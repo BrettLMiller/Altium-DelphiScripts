@@ -1,0 +1,11 @@
+ScriptingSystem:RunScriptText
+Text=Begin ShowMessage(PCBServer.GetCurrentPCBBoard.SelectecObject(0).SourceUniqueId); end;
+
+Text=Begin if (PCBServer.GetCurrentPCBBoard.SelectecObjectCount > 0) then ShowMessage(PCBServer.GetCurrentPCBBoard.SelectecObject(0).SourceUniqueId); end;
+
+Text=Var B;Begin B:= PCBServer.GetCurrentPCBBoard;if(B.SelectecObjectCount > 0) then ShowMessage(B.SelectecObject(0).SourceUniqueId); end;
+
+
+Text=Var B,C;Begin C:=TClipboard.Create;B:=PCBServer.GetCurrentPCBBoard;C.AsText:=B.SelectecObject(0).SourceUniqueId;end;
+
+Text=Var B,C;Begin C:=TClipboard.Create;B:=PCBServer.GetCurrentPCBBoard;if(B.SelectecObjectCount>0) then C.AsText:=B.SelectecObject(0).SourceUniqueId;end;
