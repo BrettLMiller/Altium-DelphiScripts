@@ -13,7 +13,7 @@ B. Miller   Ver  Comment
 07/08/2020  0.11 Updated fn to handle all possible "pieces" & contours (inc. holes) or just outline.
 08/02/2021  0.12 Separate unconnected region contours, set masks, example. invert idea.
 15/04/2021  0.13 Added Polygon function.
-
+02/08/2021  0.14 add polyregion shape support to AddPolygon
  ..............................................................................}
 
 Var
@@ -98,7 +98,6 @@ Begin
     PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
     PCBServer.PreProcess;
     Result := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
-//    PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
     Result.Name                := PolygonName;
     Result.Layer               := Layer;
     Result.PolyHatchStyle      := ePolySolid;
@@ -109,9 +108,6 @@ Begin
     Result.PourOver            := ePolygonPourOver_SameNet;  //  ePolygonPourOver_SameNetPolygon;
     Result.AvoidObsticles      := True;
     Result.Net                 := PNet;
-
-//  DNW
-//    Result.Polygon := GPC.Replicate.Polygon;
 
     GPCVL := GPC.Contour(0);                   // refed to absolute
     Result.PointCount := GPCVL.Count;
@@ -131,8 +127,90 @@ Begin
     Result.Rebuild;
     Result.CopperPourValidate;
 
-//    PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-//    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
+    PCBServer.PostProcess;
+end;
+
+// supports polyregion with multi contours (must be holes)
+Function AddPolygonToBoard2(Region : IPCB_Region; const PolygonName : WideString, const MainContour : boolean) : IPCB_Polygon;
+Var
+    I          : Integer;
+    NewReg     : IPCB_Region;
+    Poly       : IPCB_Polygon;
+    GPC        : IPCB_GeometricPolygon;
+    GPCVL      : Pgpc_vertex_list;  //Contour
+    PolySeg    : TPolySegment;
+    UnionIndex : Integer;
+
+Begin
+    UnionIndex := GetHashID_ForString(GetWorkSpace.DM_GenerateUniqueID);
+
+    ReportLog.Add('NewPolygon: ''' + PolygonName + ''' on Layer ''' + cLayerStrings[Region.Layer] + '''');
+    //Update so that Polygons always repour - avoids polygon repour yes/no dialog box popping up.
+    PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
+    PCBServer.PreProcess;
+    Result := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
+    Result.Name                := PolygonName;
+    Result.Layer               := Region.Layer;
+    Result.PolyHatchStyle      := ePolySolid;
+    Result.RemoveIslandsByArea := False;
+    Result.RemoveNarrowNecks   := True;
+    Result.ArcApproximation    := MilsToCoord(0.5);
+    Result.RemoveDead          := False;
+    Result.PourOver            := ePolygonPourOver_SameNet;  //  ePolygonPourOver_SameNetPolygon;
+    Result.AvoidObsticles      := True;
+    if Region.InNet then
+        Result.Net             := Region.Net;
+
+    if Region.ShapeSegmentCount > 0 then
+    begin
+        Result.PointCount := Region.ShapeSegmentCount;
+        for I := 0 to (Region.ShapeSegmentCount - 0) do
+        begin
+            PolySeg := Region.ShapeSegments(I);
+            Result.Segments[I] := PolySeg;
+            ReportLog.Add(IntToStr(PolySeg.Kind) + ' ' + CoordUnitToString(PolySeg.vx - BOrigin.X ,eMils) + '  ' + CoordUnitToString(PolySeg.vy - BOrigin.Y, eMils) );
+        end;
+    end
+    else
+    begin
+        GPCVL := Region.MainContour;
+        Result.PointCount := GPCVL.Count;
+        PolySeg := TPolySegment;
+        PolySeg.Kind := ePolySegmentLine;
+        for I := 0 to (GPCVL.Count) do     // loop to count
+        begin
+            PolySeg.vx   := GPCVL.x(I);
+            PolySeg.vy   := GPCVL.y(I);
+            Result.Segments[I] := PolySeg;
+            ReportLog.Add(CoordUnitToString(GPCVL.x(I) - BOrigin.X ,eMils) + '  ' + CoordUnitToString(GPCVL.y(I) - BOrigin.Y, eMils) );
+        end;
+    end;
+
+    Board.AddPCBObject(Result);
+
+    GPC := Region.GeometricPolygon;
+    if (not MainContour) and (GPC.Count > 1) then
+    begin
+        for I := 0 to (GPC.Count - 1) do
+        begin
+            Result.UnionIndex := UnionIndex;
+            if GPC.IsHole(I) then
+            begin
+                GPCVL := GPC.Contour(I);
+                NewReg := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+                NewReg.SetOutlineContour(GPCVL);
+                NewReg.SetState_Kind(ePolyRegionKind_Cutout);
+                NewReg.Layer := Region.Layer;
+                NewReg.UnionIndex := UnionIndex;
+                Board.AddPCBObject(NewReg);
+            end;
+        end;
+    end;
+
+    Result.SetState_CopperPourInvalid;
+    Result.Rebuild;
+    Result.CopperPourValidate;
+
     PCBServer.PostProcess;
 end;
 
