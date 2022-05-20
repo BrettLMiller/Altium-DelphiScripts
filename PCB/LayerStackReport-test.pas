@@ -25,11 +25,14 @@
  18/06/2021 0.58  DielectricTypeToStr is builtin fn..
  13/04/2022 0.59  change logic handling layer types in each class. Sum thickness in Physical
  21/04/2022 0.60  support PcbLib single LayerStack.
+ 22/04/2022 0.61  sub-stack regions appear to be (2) possible kinds. Hacky soln.
 
          tbd :  Use Layer Classes test in AD17 & AD19
-                get the stack region names for each substack.
+                get the matching stack region names for each substack.
                 IPCB_BoardRegionManager
                 ILayerStackProvider / ILayerStackInfo / GUID
+
+More crappy Altium mess.  
 
 Note: can report all mech layers in AD17-AD22
 
@@ -100,8 +103,10 @@ begin
     SR := Biterator.FirstPCBObject;
     while SR <> nil do
     begin
+    // one stack has BoardRegion kind NamedRegion = 2
+    // but substack regions seem to be kind = 3  eRegionKind_BoardCutout ??
     //  Default Layer Stack Region
-        if (SR.Kind = eRegionKind_NamedRegion) then
+        if (SR.Kind = eRegionKind_NamedRegion) or (SR.Kind = 3) then
         if (SR.Name <> '') then          // kludge hack ?
             Result.Add(SR);
         SR.InBoard;
@@ -270,6 +275,7 @@ var
     LayerStack  : IPCB_LayerStack_V7;
     LIterator   : IPCB_LayerObjectIterator;
     LayerObj    : IPCB_LayerObject;
+    Dielectric  : IPCB_DielectricObject;
     LayerName   : WideString;
     ShortLName  : WideString;
     MidLName    : WideString;
@@ -324,7 +330,7 @@ begin
     if PCBLib <> nil then
     begin
         SubStack := Board.LayerStack;
-        TempS.Add('Layer Stack: ' + SubStack.Name + '  ID: ' + SubStack.ID);
+        TempS.Add('Layer Stack: ' + PadRight(SubStack.Name, 30) + '  ID: ' + SubStack.ID);
         ReportSubStack(0, SubStack);
     end else
     begin
@@ -332,14 +338,20 @@ begin
         for i := 0 to (LSR.Count - 1) do
         begin
             BR := LSR.Items(i);
-            TempS.Add('Stack Region: ' + IntToStr(i + 1) + '  name: ' + BR.Name + '  LS: ' + BR.Board.LayerStack.Name + '  area: ' + FormatFloat(',0.###', BR.Area / c1_00MM / c1_00MM) + ' sq.mm ' );
+            BR.Descriptor;
+            BR.Handle;
+            BR.Identifier;
+            BR.Index;
+            BR.ObjectIDString;
+            BR.Detail;
+            TempS.Add('Stack Region ' + IntToStr(i + 1) + '  name: ' + PadRight(BR.Name,30) + ' LS: DNK          area: ' + FormatFloat(',0.###', BR.Area / c1_00MM / c1_00MM) + ' sq.mm ' );
         end;
         TempS.Add('');
         TempS.Add('Number of Sub Stacks: ' + IntToStr(MasterStack.SubstackCount) );
         for i := 0  to (MasterStack.SubstackCount - 1) do
         begin
             SubStack := MasterStack.SubStacks[i];
-            TempS.Add('Sub Stack: ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
+            TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
             ReportSubStack(i, SubStack);
         end;
     end;
@@ -372,8 +384,15 @@ begin
         LayerName := 'broken method NO name';
         MechLayerKind := NoMechLayerKind;
 
-        if LayerObj <> Nil then
-        begin
+//        if LayerObj <> Nil then
+//        begin
+
+            if ansipos(uppercase(Board.LayerStack.Name), Uppercase(LayerObj.Name)) > 0  then
+            begin
+                Dielectric := LayerObj;
+//                DieMatl  := Dielectric.DielectricMaterial;
+                LayerObj.IsInLayerStack;
+            end;
             LayerName  := LayerObj.Name;
             ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);  // TLayernameDisplayMode: eLayerNameDisplay_Short/Medium
             MidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
@@ -381,7 +400,7 @@ begin
 
             if not LegacyMLS then MechLayerKind := LayerObj.Kind;
 
-        end;
+//        end;
 
         TempS.Add(PadRight(IntToStr(i), 3) + PadRight(Layer, 10) + ' ' + PadRight(Board.LayerName(Layer), 20)
                   + ' ' + PadRight(LayerName, 20) + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 20)
