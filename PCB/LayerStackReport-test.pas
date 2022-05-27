@@ -227,7 +227,7 @@ begin
             begin   // dielectrics
                     Dielectric := LayerObj;  // .Dielectric Tv6
                     DieType    := kDielectricTypeStrings(Dielectric.DielectricType);
-                    if DieType = 'Surface Material' then DieType := 'Surface';
+                    if (Dielectric.DielectricType = eSurfaceMaterial) then DieType := 'Surface';
                     Thick     :=  Dielectric.DielectricHeight;
                     Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
 
