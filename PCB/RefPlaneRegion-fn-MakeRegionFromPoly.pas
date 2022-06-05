@@ -161,6 +161,8 @@ Begin
     if Region.InNet then
         Result.Net             := Region.Net;
 
+    PolySeg := TPolySegment;
+
     if Region.ShapeSegmentCount > 0 then
     begin
         Result.PointCount := Region.ShapeSegmentCount;
@@ -175,7 +177,6 @@ Begin
     begin
         GPCVL := Region.MainContour;
         Result.PointCount := GPCVL.Count;
-        PolySeg := TPolySegment;
         PolySeg.Kind := ePolySegmentLine;
         for I := 0 to (GPCVL.Count) do     // loop to count
         begin
@@ -191,9 +192,9 @@ Begin
     GPC := Region.GeometricPolygon;
     if (not MainContour) and (GPC.Count > 1) then
     begin
+        Result.UnionIndex := UnionIndex;
         for I := 0 to (GPC.Count - 1) do
         begin
-            Result.UnionIndex := UnionIndex;
             if GPC.IsHole(I) then
             begin
                 GPCVL := GPC.Contour(I);
