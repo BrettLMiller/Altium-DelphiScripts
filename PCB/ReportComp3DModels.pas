@@ -146,6 +146,7 @@ begin
         NoOfPrims := 0;
         FoundGeneric := false;
         ExtrudedBDL := TObjectList.Create;
+        ExtrudedBDL.OwnsObjects := false;
 
         CompBody := GIterator.FirstPCBObject;
         while (CompBody <> Nil) Do
@@ -205,7 +206,7 @@ begin
                 Board.RemovePCBObject(CompBody);
             end;
         end;
-        ExtrudedBDL.Destroy;
+        ExtrudedBDL.Clear;
 
         Footprint := FPIterator.NextPCBObject;
     end;
