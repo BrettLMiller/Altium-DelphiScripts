@@ -9,6 +9,7 @@
  fixId replaces the blank Extrude model name with the footprint name.
 
 27/06/2022  v0.01 POC cut out of other script & rejigged designator pattern reporting.
+                  Strip removed as does not work in PcbLib.
 
 }
 const
@@ -43,10 +44,6 @@ procedure FixIdAndReportCompBodies;
 begin
     ReportTheBodies(cFix);
 end;
-procedure StripExtrudedAndReportCompBodies;
-begin
-    ReportTheBodies(cStrip);
-end;
 
 procedure ReportTheBodies(const fix : integer);
 var
@@ -61,15 +58,14 @@ var
     FPName       : WideString;
     FPPattern    : WideString;
     ModName      : WideString;
+    ModRot       : double;  //TAngle
     CBodyName    : WideString;
     CompModelId  : WideString;
     CompArea     : WideString;
     MOrigin      : TCoordPoint;
-    ModRot       : TAngle;
     NoOfPrims    : Integer;
     Units        : TUnit;
     FoundGeneric : boolean;
-    ExtrudedBDL  : TObjectList;
     i : integer;
 
 begin
@@ -139,15 +135,12 @@ begin
         if Footprint.ItemGUID <> '' then
             Rpt.Add('ItemGUID : ' + Footprint.ItemGUID + '  ItemRevGUID : ' + Footprint.ItemRevisionGUID + '  VGUID : ' + Footprint.VaultGUID);
 
+        NoOfPrims := 0;
+        FoundGeneric := false;
+
         GIterator := Footprint.GroupIterator_Create;
         GIterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
         GIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
-
-        NoOfPrims := 0;
-        FoundGeneric := false;
-        ExtrudedBDL := TObjectList.Create;
-        ExtrudedBDL.OwnsObjects := false;
-
         CompBody := GIterator.FirstPCBObject;
         while (CompBody <> Nil) Do
         begin
@@ -179,9 +172,7 @@ begin
                 begin
                     ModName := CompModel.FileName;
                     FoundGeneric := true;
-                end
-                else
-                    ExtrudedBDL.Add(CompBody);
+                end;
 
                 Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
                         + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea);
@@ -196,18 +187,6 @@ begin
         Rpt.Add('');
 
         Footprint.GroupIterator_Destroy(GIterator);
-
-        if (FoundGeneric) and (Fix = cStrip) then
-        begin
-            for i := 0 to (ExtrudedBDL.Count -1) do
-            begin
-                CompBody := ExtrudedBDL.Items(i);
-                Footprint.RemovePCBObject(CompBody);
-                Board.RemovePCBObject(CompBody);
-            end;
-        end;
-        ExtrudedBDL.Clear;
-
         Footprint := FPIterator.NextPCBObject;
     end;
 
@@ -256,4 +235,3 @@ begin
     end;
 end;
 {..................................................................................................}
-
