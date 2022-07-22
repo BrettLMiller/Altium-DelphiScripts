@@ -2,14 +2,20 @@
 
  PcbDoc PcbLib
  from CompModelHeights.pas & LoadModels.pas
- 
+
  Report all comp body models:
     Iterate all footprints within the current doc.
 
- fixId replaces the blank Extrude model name with the footprint name.
+ FixId replaces the blank Extruded model name with the footprint name.
+
+ StripExtruded
+     removes extruded models if the FP has a generic model.
 
 27/06/2022  v0.01 POC cut out of other script & rejigged designator pattern reporting.
-                  Strip removed as does not work in PcbLib.
+03/07/2022  v0.10 refactor PcbLib loop, faster & fix delete extruded models
+
+
+PcbLib Component origin is a mess. The focused comp has a different origin??
 
 }
 const
@@ -20,7 +26,7 @@ const
     cFix    = 1;
     cStrip  = 2;
 
-    ArcResolution     = 0.05;    // mils : impacts number of edges etc..
+    cDummyComponent = '---CrazyAltiumNonsenseDummy---';
 
 var
     Project   : IProject;
@@ -30,11 +36,14 @@ var
     Board     : IPCB_Board;
     PcbLib    : IPCB_Library;
     IsLib     : boolean;
+    Units     : TUnit;
     BOrigin   : TCoordPoint;
 
-procedure SaveReportLog(FileExt : WideString, const display : boolean); forward;
-function ModelTypeToStr (ModType : T3DModelType) : WideString;          forward;
-procedure ReportTheBodies(const fix : boolean);                         forward;
+function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
+procedure SaveReportLog(FileExt : WideString, const display : boolean);                                 forward;
+function ModelTypeToStr (ModType : T3DModelType) : WideString;                                          forward;
+procedure ReportTheBodies(const fix : boolean);                                                         forward;
+function ProcessReportBodies(Footprint : IPCB_Component, Islib : boolean, fix : boolean) : TObjectList; forward;
 
 procedure ReportCompBodies;
 begin
@@ -44,29 +53,22 @@ procedure FixIdAndReportCompBodies;
 begin
     ReportTheBodies(cFix);
 end;
+procedure StripExtrudedAndReportCompBodies;
+begin
+    ReportTheBodies(cStrip);
+end;
 
 procedure ReportTheBodies(const fix : integer);
 var
-    CurrentLib   : IPCB_Library;
+    PcbLib       : IPCB_Library;
     FPIterator   : IPCB_BoardIterator;
-    GIterator    : IPCB_GroupIterator;
     Footprint    : IPCB_Component;
+    SpecialFP    : IPCB_Component;
     CompBody     : IPCB_ComponentBody;
     PLayerSet    : IPCB_LayerSet;
-    CompModel    : IPCB_Model;
-    ModType      : T3DModelType;
-    FPName       : WideString;
-    FPPattern    : WideString;
-    ModName      : WideString;
-    ModRot       : double;  //TAngle
-    CBodyName    : WideString;
-    CompModelId  : WideString;
-    CompArea     : WideString;
-    MOrigin      : TCoordPoint;
-    NoOfPrims    : Integer;
-    Units        : TUnit;
-    FoundGeneric : boolean;
-    i : integer;
+
+    CBList       : TObjectList;
+    i, j         : integer;
 
 begin
     Document := GetWorkSpace.DM_FocusedDocument;
@@ -78,20 +80,22 @@ begin
     IsLib  := false;
     if (Document.DM_DocumentKind = cDocKind_PcbLib) then
     begin
-        CurrentLib := PCBServer.GetCurrentPCBLibrary;
-        Board := CurrentLib.Board;
+        PcbLib := PCBServer.GetCurrentPCBLibrary;
+        Board := PcbLib.Board;
         IsLib := true;
     end else
         Board  := PCBServer.GetCurrentPCBBoard;
 
-    if (Board = nil) and (CurrentLib = nil) then
+    if (Board = nil) and (PcbLib = nil) then
     begin
         ShowError('Failed to find PcbDoc or PcbLib.. ');
         exit;
     end;
 
     BeginHourGlass(crHourGlass);
-    BOrigin  := Point(Board.XOrigin, Board.YOrigin     );  // abs Tcoord
+// PcbLib origin is (0,0) if FP is not selected
+    if IsLib then BOrigin := Point(0, 0)
+    else          BOrigin := Point(Board.XOrigin, Board.YOrigin);  // abs Tcoord
     Units := Board.DisplayUnit;
 
     PLayerSet := LayerSetUtils.EmptySet;
@@ -106,102 +110,236 @@ begin
             + ' | ' + PadLeft('X',10) + ' | ' + PadLeft('Y',10) + ' | Ang ' );
     Rpt.Add('');
 
-    // For each page of library is a footprint
     if IsLib then
-        FPIterator := CurrentLib.LibraryIterator_Create
-    else FPIterator := Board.BoardIterator_Create;
-    FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
-    FPIterator.AddFilter_IPCB_LayerSet(PLayerSet);
-    if IsLib then
-        FPIterator.SetState_FilterAll
-    else
+    begin
+        SpecialFP := PcbLib.GetComponentByName(cDummyComponent);
+        if SpecialFP = nil then
+            SpecialFP := PcbServer.CreatePCBLibComp;
+        SpecialFP.Name := cDummyComponent;
+        PcbLib.RegisterComponent(SpecialFP);
+        PcbLib.SetState_CurrentComponent(SpecialFP);
+        PcbLib.Board.ViewManager_FullUpdate;          // update all panels assoc. with PCB
+        PcbLib.RefreshView;
+
+        for i := 0 to (PcbLib.ComponentCount - 1) do
+        begin
+            Footprint := PcbLib.GetComponent(i);
+            if Footprint.Name = SpecialFP.Name  then continue;
+            CBList := ProcessReportBodies(Footprint, Islib, fix);
+
+//            Footprint.BeginModify;
+
+            if (Fix = cStrip) then
+            for j := 0 to (CBList.Count - 1) do
+            begin
+                CompBody := CBList.Items(j);
+                Rpt.Add('stripped |' + PadRight(Footprint.Name, 6) + '|' + '|' + PadRight(CompBody.Identifier, 20) );
+                Footprint.RemovePCBObject(CompBody);
+            end;
+//            Footprint.EndModify;
+
+            Rpt.Add('');
+            CBList.Clear;
+        end;
+
+// if found any generic then CBList contains all non-generics.
+        if SpecialFP <> nil then
+        begin
+            PcbLib.RemoveComponent(SpecialFP);
+            PcbServer.DestroyPCBLibComp(SpecialFP);
+            PcbLib.Navigate_FirstComponent;
+            PcbLib.Board.ViewManager_FullUpdate;
+            PcbLib.RefreshView;
+        end;
+
+// PcbDoc
+    end else
+    begin
+        FPIterator := Board.BoardIterator_Create;
+        FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+        FPIterator.AddFilter_IPCB_LayerSet(PLayerSet);
         FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
 
-    Footprint := FPIterator.FirstPCBObject;
-    while Footprint <> Nil Do
-    begin
-       if IsLib then
+        Footprint := FPIterator.FirstPCBObject;
+        while Footprint <> Nil Do
         begin
-            FPName    := Footprint.Name;
-            FPPattern := Footprint.Name;
-            CurrentLib.SetState_CurrentComponent (Footprint)      // to make origin correct.
-        end else
-        begin
-//            FPDes     := Footprint.SourceDesignator;
-            FPName    := Footprint.Name.Text;
-            FPPattern := Footprint.Pattern;
-        end;
+            CBList := ProcessReportBodies(Footprint, Islib, fix);
 
-        if Footprint.ItemGUID <> '' then
-            Rpt.Add('ItemGUID : ' + Footprint.ItemGUID + '  ItemRevGUID : ' + Footprint.ItemRevisionGUID + '  VGUID : ' + Footprint.VaultGUID);
-
-        NoOfPrims := 0;
-        FoundGeneric := false;
-
-        GIterator := Footprint.GroupIterator_Create;
-        GIterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
-        GIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
-        CompBody := GIterator.FirstPCBObject;
-        while (CompBody <> Nil) Do
-        begin
-            CompModel := CompBody.Model;
-
-            CompBody.ShapeSegmentCount;
-            CompBody.HoleCount;
-            CBodyName := CompBody.Name;                      // ='' for all 3d comp body
-
-            CompArea  := SqrCoordToUnitString_i(CompBody.Area, Units, 3);
-
-            if CompModel <> nil then
+            Footprint.BeginModify;
+            if (Fix = cStrip) then
+            for j := 0 to (CBList.Count - 1) do
             begin
-                Inc(NoOfPrims);
-                ModType     := CompModel.ModelType;
-                MOrigin     := CompModel.Origin;
-                ModRot      := CompModel.Rotation;
-                CompModelId := CompBody.Identifier;
-
-// name the blank models with designator & footprint pattern
-                if (Fix = cFix) then
-                if (CompModelId = '') then  CompBody.SetState_Identifier(FPName + '_' + FPPattern);
-
-                CompModelId := CompBody.Identifier;
-                ModName := CBodyName;
-           //     CompModel.Name := FPName;
-           //     CompBody.Name  := FPName;
-                if (ModType = e3DModelType_Generic) then
-                begin
-                    ModName := CompModel.FileName;
-                    FoundGeneric := true;
-                end;
-
-                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
-                        + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea);
-
-// vault stuff
-//                if CompModel.ItemGUID <> '' then
-//                    Rpt.Add('ItemGUID : ' + CompModel.ItemGUID + '  ItemRevGUID : ' + CompModel.ItemRevisionGUID + '  VGUID : ' + CompModel.VaultGUID);
+                CompBody := CBList.Items(j);
+                Rpt.Add('stripped |' + PadRight(Footprint.Name.Text, 20) + '|' + PadRight(Footprint.Pattern, 20) + '|' + PadRight(CompBody.Identifier, 20) );
+                Footprint.RemovePCBObject(CompBody);
+                Board.RemovePCBObject(CompBody);
             end;
-            CompBody := GIterator.NextPCBObject;
+            Footprint.EndModify;
+            Footprint := FPIterator.NextPCBObject;
+
+            Rpt.Add('');
+            CBList.Clear;
         end;
 
-        Rpt.Add('');
-
-        Footprint.GroupIterator_Destroy(GIterator);
-        Footprint := FPIterator.NextPCBObject;
+        Board.BoardIterator_Destroy(FPIterator);
+        Board.GraphicalView_ZoomRedraw;
     end;
-
-    if IsLib then
-        CurrentLib.LibraryIterator_Destroy(FPIterator)
-    else Board.BoardIterator_Destroy(FPIterator);
-
-    if IsLib then CurrentLib.Navigate_FirstComponent;
-    Board.GraphicalView_ZoomRedraw;
-    if IsLib then CurrentLib.RefreshView;
 
     EndHourGlass;
 
     SaveReportLog('FPBodyReport.txt', true);
     Rpt.Free;
+end;
+
+// returns the non-generic bodies
+function ProcessReportBodies(Footprint : IPCB_Component, Islib : boolean, fix : boolean) : TObjectList;
+var
+    CompBody     : IPCB_ComponentBody;
+    CompModel    : IPCB_Model;
+    ModType      : T3DModelType;
+    FPName       : WideString;
+    FPPattern    : WideString;
+    CBodyName    : WideString;
+    CompModelId  : WideString;
+    CompArea     : WideString;
+    ModName      : WideString;
+    MOrigin      : TCoordPoint;
+    ModRot       : TAngle;
+    NoOfPrims    : Integer;
+    FoundGeneric : boolean;
+    CBList       : TObjectList;
+    i            : integer;
+
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
+
+    if IsLib then
+    begin
+        FPName    := 'FP';
+        FPPattern := Footprint.Name;
+//        CurrentLib.SetState_CurrentComponent (Footprint)      // to make origin correct.
+    end else
+    begin
+//        FPDes     := Footprint.SourceDesignator;
+        FPName    := Footprint.Name.Text;
+        FPPattern := Footprint.Pattern;
+    end;
+
+    if Footprint.ItemGUID <> '' then
+        Rpt.Add('ItemGUID : ' + Footprint.ItemGUID + '  ItemRevGUID : ' + Footprint.ItemRevisionGUID + '  VGUID : ' + Footprint.VaultGUID);
+
+    NoOfPrims := 0;
+    FoundGeneric := false;
+
+    CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, false);
+    if CBList.Count > 0 then FoundGeneric := true;
+    
+    for i := 0 to (CBList.Count - 1) do
+    begin
+        CompBody := CBList.Items(i);
+
+        CompBody.ShapeSegmentCount;
+        CompBody.HoleCount;
+
+        CBodyName := CompBody.Name;                      // ='' for all 3d comp body
+        CompModelId := CompBody.Identifier;
+        CompArea  := SqrCoordToUnitString_i(CompBody.Area, Units, 3);
+
+        CompModel := CompBody.Model;
+        if CompModel <> nil then
+        begin
+                Inc(NoOfPrims);
+                ModName := CompModel.FileName;
+                ModType := CompModel.ModelType;
+                MOrigin := CompModel.Origin;
+                ModRot  := CompModel.Rotation;
+
+                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+                        + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea);
+//  vault stuff
+//                if CompModel.ItemGUID <> '' then
+//                    Rpt.Add('ItemGUID : ' + CompModel.ItemGUID + '  ItemRevGUID : ' + CompModel.ItemRevisionGUID + '  VGUID : ' + CompModel.VaultGUID);
+        end;
+    end;
+
+// non-generics
+    CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
+
+    for i := 0 to (CBList.Count - 1) do
+    begin
+        CompBody := CBList.Items(i);
+        CBodyName := CompBody.Name;                      // ='' for all 3d comp body
+        CompModelId := CompBody.Identifier;
+        CompBody.ShapeSegmentCount;
+        CompBody.HoleCount;
+        ModName := CBodyName;
+        CompArea  := SqrCoordToUnitString_i(CompBody.Area, Units, 3);
+
+// name the blank models with designator & footprint pattern
+        if (Fix = cFix) then
+        if (CompModelId = '') then  CompBody.SetState_Identifier(FPName + '_' + FPPattern);
+        //     CompModel.Name := FPName;
+        //     CompBody.Name  := FPName;
+
+        CompModelId := CompBody.Identifier;
+
+        CompModel := CompBody.Model;
+        if CompModel <> nil then
+        begin
+            Inc(NoOfPrims);
+            ModType     := CompModel.ModelType;
+            MOrigin     := CompModel.Origin;
+            ModRot      := CompModel.Rotation;
+
+            Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+                        + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea);
+        end;
+    end;
+
+//  return non-generics if any generic was found
+    if FoundGeneric then
+    for i := 0 to (CBList.Count - 1) do
+    begin
+        CompBody := CBList.Items(i);
+        Result.Add(CompBody);
+    end;
+    CBList.Clear;
+end;
+{---------------------------------------------------------------------------------------------------------------------------}
+function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList;
+var
+    GIterator        : IPCB_GroupIterator;
+    CompBody         : IPCB_ComponentBody;
+    CompModel        : IPCB_Model;
+    ModelFileName    : WideString;
+
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
+
+    GIterator := Footprint.GroupIterator_Create;
+    GIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
+    CompBody := GIterator.FirstPCBObject;
+
+    while CompBody <> Nil do
+    begin
+        CompModel := CompBody.Model;
+        if CompModel <> nil then
+        begin
+            if Exclude xor (ModType = CompModel.ModelType) then  //  cModel3DGeneric
+            begin
+//                ModDefName  := CompModel.Name;    //  DefaultPCB3DModel;
+                ModelFileName := CompModel.FileName;
+                if SameString(BodyId, ExtractFileName(ModelFileName), false) then
+                    Result.Add(CompBody);
+                if SameString(BodyId, '*', false) then
+                    Result.Add(CompBody);
+            end;
+        end;
+        CompBody := GIterator.NextPCBObject;
+    end;
+    Footprint.GroupIterator_Destroy(GIterator);
 end;
 {---------------------------------------------------------------------------------------------------------------------------}
 procedure SaveReportLog(FileExt : WideString, const display : boolean);
