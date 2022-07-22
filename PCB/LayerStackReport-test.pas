@@ -26,16 +26,17 @@
  13/04/2022 0.59  change logic handling layer types in each class. Sum thickness in Physical
  21/04/2022 0.60  support PcbLib single LayerStack.
  22/04/2022 0.61  sub-stack regions appear to be (2) possible kinds. Hacky soln.
+ 22/07/2022 0.62  very hacky soln to get the CamView gerber layer name-numbers.
 
-         tbd :  Use Layer Classes test in AD17 & AD19
+         tbd : find way to fix short & mid names if wrong.
+                Use Layer Classes test in AD17 & AD19
                 get the matching stack region names for each substack.
                 IPCB_BoardRegionManager
                 ILayerStackProvider / ILayerStackInfo / GUID
 
-More crappy Altium mess.  
+More crappy Altium mess.
 
 Note: can report all mech layers in AD17-AD22
-
 ..................................................................................}
 
 {.................................................................................}
@@ -45,7 +46,9 @@ const
     AD19MaxMechLayers = 1024;
     NoMechLayerKind   = 0;      // enum const does not exist for AD17/18
     cPasteThick       = 4       // std stencil (mil)
+
     cPhysicalLSOnly   = true;   // only report the physical class.
+    cCheckLayerNames  = false;  // but can NOT change short & mid names of signal, plane & dielectric.
 
 var
     PCBSysOpts     : IPCB_SystemOptions;
@@ -72,7 +75,9 @@ function LayerClassName (LClass : TLayerClassID) : WideString;                  
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;       forward;
 function Version(const dummy : boolean) : TStringList;                          forward;
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack;, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
+function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;  forward;
 
+// WIP
 function IsInLayerClass(LayerObj : IPCB_LayerObject, LClass : TLayerClassID) : boolean;
 var
    LayerClass : TLayerClassID;
@@ -125,12 +130,158 @@ begin
 } //    eBoardOutlineObject, eBoardRegionLayerStack,
 end;
 
+// only called is const cCheckLayerNames is true
+// fixing short & mid is not possible yet.
+procedure CheckShortMidLayerNames(StackIndex: integer, SubStack : IPCB_LayerStack);
+var
+    LayerObj    : IPCB_LayerObject;
+    LayerClass  : TLayerClassID;
+    LC1, LC2    : TLayerClass;
+    i           : Integer;
+
+    LayerPos    : WideString;
+    OShortLName  : WideString;
+    OMidLName    : WideString;
+    ShortLName  : WideString;
+    MidLName    : WideString;
+    LongLName   : WideString;
+    IsPlane     : boolean;
+    IsSignal    : boolean;
+    LAddress    : integer;
+    LIndex     : integer;
+
+begin
+    i := 1;
+// signal layers
+// TL   TOP Top Layer
+// 1    Mid-1   Mid Layer 1
+
+    TempS.Add('Signals');
+    LIndex  := 0;
+    LayerClass := eLayerClass_Signal;
+    LayerObj := SubStack.First(LayerClass);
+
+    While (LayerObj <> Nil ) do
+    begin
+        Layer := LayerObj.V7_LayerID.ID;
+        LayerObj.IsInLayerStack;       // check always true.
+
+        LAddress := GetLayerSetCamViewNumber(Layer);
+        Inc(LIndex);
+        LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));
+
+   //     TLayernameDisplayMode: eLayerNameDisplay_Short/Medium/Long
+        OShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
+        OMidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
+        LongLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long) ;
+
+        if (Layer <> eTopLayer) and (Layer <> eBottomLayer) then
+        begin
+            ShortLName := IntToStr(LIndex-1);
+            MidLName   := 'Mid-' + IntToStr(Lindex-1);
+//            LayerObj.SetState_LayerDisplayName_Short(ShortLName);
+//            LayerUtils.AsShortDisplayString(LIndex) := ShortLName;
+//            LayerObj.SetState_LayerDisplayName(eLayerNameDisplay_Medium) := MidLName;
+
+            if OShortLName <> ShortLName then
+                TempS.Add('bad short name');
+            if oMidLName <> MidLName then
+                TempS.Add('bad mid name');
+        end;
+
+        TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(LIndex),5) + ' | ' + PadRight(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 20)
+                      + PadRight(OShortLName, 5) + ' ' + PadRight(OMidLName, 13) + '  ' + PadRight(LongLName, 15)
+                      + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadLeft(IntToStr(Layer), 9) + ' '
+                      + ' LP:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7) );
+
+            LayerObj := SubStack.Next(Layerclass, LayerObj);
+        Inc(i);
+    end;
+
+// Plane layers:
+// P1   Plane-1  "user name"
+
+    TempS.Add('Planes');
+    LIndex := 0;
+    LayerClass := eLayerClass_InternalPlane;
+    LayerObj := SubStack.First(LayerClass);
+
+    While (LayerObj <> Nil ) do
+    begin
+        Layer := LayerObj.V7_LayerID.ID;
+        LayerObj.IsInLayerStack;       // check always true.
+
+        LAddress := GetLayerSetCamViewNumber(Layer);
+        Inc(LIndex);
+        LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));
+
+        OShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
+        OMidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
+        LongLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long) ;
+
+        ShortLName := 'P'+IntToStr(LIndex);
+        MidLName   := 'Plane-' + IntToStr(LIndex);
+        if OShortLName <> ShortLName then
+            TempS.Add('bad short name');
+        if oMidLName <> MidLName then
+            TempS.Add('bad mid name');
+
+        TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(LIndex),5) + ' | ' + PadRight(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 20)
+                      + PadRight(OShortLName, 5) + ' ' + PadRight(OMidLName, 13) + '  ' + PadRight(LongLName, 15)
+                      + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadLeft(IntToStr(Layer), 9) + ' '
+                      + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7) );
+
+        LayerObj := SubStack.Next(Layerclass, LayerObj);
+        Inc(i);
+    end;
+
+// Dielectric layers:
+// D1   Dielectric-1  "user name"
+
+    TempS.Add('Dielectric Layers');
+    LIndex := 0;
+    LayerClass := eLayerClass_Dielectric;
+    LayerObj := SubStack.First(LayerClass);
+
+    While (LayerObj <> Nil ) do
+    begin
+        Layer := LayerObj.V7_LayerID.ID;
+        LayerObj.IsInLayerStack;       // check always true.
+
+        LAddress := GetLayerSetCamViewNumber(Layer);
+        LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));
+
+        OShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
+        OMidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
+        LongLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long) ;
+
+        if LayerObj.DielectricType <>  eSurfaceMaterial then
+        begin
+            Inc(LIndex);
+            ShortLName := 'D'+IntToStr(LIndex);
+            MidLName   := 'Dielectric-' + IntToStr(Lindex);
+            if OShortLName <> ShortLName then
+                TempS.Add('bad short name');
+            if oMidLName <> MidLName then
+                TempS.Add('bad mid name');
+        end;
+
+        TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(LIndex),5) + ' | ' + PadRight(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 20)
+                      + PadRight(OShortLName, 5) + ' ' + PadRight(OMidLName, 13) + '  ' + PadRight(LongLName, 15)
+                      + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadLeft(IntToStr(Layer), 9) + ' '
+                      + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7) );
+
+        LayerObj := SubStack.Next(Layerclass, LayerObj);
+        Inc(i);
+    end;
+end;
+
 procedure ReportSubStack(StackIndex: integer, SubStack : IPCB_LayerStack);
 var
     LayerObj    : IPCB_LayerObject;
     LayerClass  : TLayerClassID;
     LC1, LC2    : TLayerClass;
-    Dielectric  : IPCB_DielectricObject;
+    Dielectric  : IPCB_DielectricLayer;
     Copper      : IPCB_ElectricalLayer;
     i           : Integer;
     temp        : integer;
@@ -144,14 +295,16 @@ var
     ShortLName  : WideString;
     MidLName    : WideString;
     LongLName   : WideString;
+    IsPlane     : boolean;
+    IsSignal    : boolean;
     IsDisplayed : boolean;
     TotThick    : TCoord;
     Thick       : TCoord;
     LAddress    : integer;
-    Param       : PWideChar;
-    WS : widestring;
+    LSLIndex    : integer;
 
 begin
+
     TempS.Add(' Layers in stack: '    + IntToStr(SubStack.Count) );
     TempS.Add('  is flex layer? :    '    + BoolToStr(SubStack.IsFlex, true) );
     TempS.Add('');
@@ -173,12 +326,12 @@ begin
     begin
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
         if (LayerClass = eLayerClass_Dielectric) or (LayerClass = eLayerClass_SolderMask) then
-                TempS.Add('lc.i  |     LO name             short  mid           long          IsDisplayed? Colour     V7_LayerID Used? Dielectric : Type    Matl    Thickness  Const ')
+            TempS.Add('lc.i  |     LO name             short mid            Plane  Displayed  Colour     V7_LID   Used? Dielectric : Type    Matl    Thickness  Const ')
         else if (LayerClass = eLayerClass_Electrical) or (LayerClass = eLayerClass_Signal)
-                 or (LayerClass = eLayerClass_PasteMask) or (LayerClass = eLayerClass_InternalPlane) then
-                TempS.Add('lc.i  | Pos LO name             short  mid           long          IsDisplayed? Colour     V7_LayerID Used?                              Thickness (Cu)')
+             or (LayerClass = eLayerClass_PasteMask) or (LayerClass = eLayerClass_InternalPlane) then
+            TempS.Add('lc.i  | Pos LO name             short mid            Plane  Displayed  Colour     V7_LID   Used?                              Thickness (Cu) ')
         else
-                TempS.Add('lc.i  |     LO name             short  mid           long          IsDisplayed? Colour     V7_LayerID Used? ');
+            TempS.Add('lc.i  |     LO name             short mid            Plane  Displayed  Colour     V7_LID   Used? ');
 
         i := 1;
         LayerObj := SubStack.First(LayerClass);
@@ -187,14 +340,15 @@ begin
         begin
             Layer := LayerObj.V7_LayerID.ID;
             LayerObj.IsInLayerStack;       // check always true.
+// fight to get gerber index layer numbers.
+            LSLIndex := GetLayerSetCamViewNumber(Layer);
+            LAddress := LSLIndex;
 
 {               ILayerStackProvider;
                 LSI := ILayerStackProvider.GetLayerStackInfo(j);
                 LSI.IsLayerInLayerStack(Layer);
                 LSI.GetLayerInfo(Layer).GetState_GUID;
 }
-            LAddress := LayerObj.I_ObjectAddress;
-
             LayerPos  := '';
             Thick     := 0;
             Thickness := '';
@@ -202,9 +356,12 @@ begin
             DieMatl   := '';
             DieConst  := '';     // as string for simplicity of reporting
 
-            if LayerUtils.IsSignalLayer(Layer) or LayerUtils.IsElectricalLayer(Layer) or LayerUtils.IsInternalPlaneLayer(Layer) then
+            IsPlane  := LayerUtils.IsInternalPlaneLayer(Layer);
+            IsSignal := LayerUtils.IsSignalLayer(Layer);
+
+            if IsSignal or LayerUtils.IsElectricalLayer(Layer) or IsPlane then
             begin
-                    Copper    := LayerObj;
+                Copper    := LayerObj;
                     Thick     := Copper.CopperThickness;
                     Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
                 //  think this only applies to eLayerClass_Electrical
@@ -224,10 +381,11 @@ begin
                     LayerObj.Name;
             end
             else
-            begin   // dielectrics
+            begin   // dielectrics     eSurface eCore ePrepreg
                     Dielectric := LayerObj;  // .Dielectric Tv6
                     DieType    := kDielectricTypeStrings(Dielectric.DielectricType);
                     if (Dielectric.DielectricType = eSurfaceMaterial) then DieType := 'Surface';
+                    if Dielectric.DielectricType = eCore then DieType := 'Core';
                     Thick     :=  Dielectric.DielectricHeight;
                     Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
 
@@ -253,10 +411,10 @@ begin
             LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
 
             TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),5) + ' | ' + PadRight(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 20)
-                      + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 13) + '  ' + PadRight(LongLName, 15)
-                      + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
+                      + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 13) // + '  ' + PadRight(LongLName, 20)
+                      + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
                       + PadLeft(IntToStr(Layer), 9) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true), 6)
-                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' LP:' + IntToStr(LAddress) );
+                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7));
 
             LayerObj := SubStack.Next(Layerclass, LayerObj);
             Inc(i);
@@ -287,6 +445,8 @@ var
     LowPos, HighPos     : integer;
     i           : integer;
     FileName    : String;
+    XLayers     : string;
+    LSLIndex    : integer;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
@@ -312,6 +472,9 @@ begin
     FileName := ExtractFilePath(FileName);
 
     MasterStack := Board.MasterLayerStack;
+//    XLayers := WideStrAlloc(10000);
+//    MasterStack.Export_ToParameters(XLayers);
+
 
     LSR := FindBoardStackRegions(Board);
 
@@ -352,8 +515,20 @@ begin
         begin
             SubStack := MasterStack.SubStacks[i];
             TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
+            MasterStack;
             ReportSubStack(i, SubStack);
         end;
+
+        if (cCheckLayerNames) then
+        for i := 0  to (MasterStack.SubstackCount - 1) do
+        begin
+            SubStack := MasterStack.SubStacks[i];
+            TempS.Add('Checking short & mid layer names ');
+            TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
+            CheckShortMidLayerNames(i, SubStack);
+        end;
+        
+
     end;
 
     TempS.Add('');
@@ -373,6 +548,8 @@ begin
         Inc(i);
         LayerObj := LIterator.LayerObject;
         Layer    := LIterator.Layer;
+
+        LSLIndex := GetLayerSetCamViewNumber(Layer);
 
 //    Old Methods for Mechanical Layers. Can list all disabled layers
 //    LayerStack := Board.LayerStack_V7;
@@ -404,7 +581,7 @@ begin
 
         TempS.Add(PadRight(IntToStr(i), 3) + PadRight(Layer, 10) + ' ' + PadRight(Board.LayerName(Layer), 20)
                   + ' ' + PadRight(LayerName, 20) + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 20)
-                  + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + BoolToStr(LayerObj.UsedByPrims, true) );
+                  + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true),8)  + ' GI:' + IntToStr(LSLIndex) + ':' + IntToHex(LSLIndex,7) );
     end;
 
     TempS.Add('');
@@ -553,6 +730,48 @@ begin
             end;
         end;
     end;
+end;
+
+function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;
+var
+    ALayerSet   : IPCB_LayerSet;
+    slLayerSet  : TStringList;
+    slLayerLine : TStringList;
+    LSText      : WideString;
+    Idx : integer;
+begin
+    Result := 0;
+    slLayerSet := TStringList.Create;
+    slLayerSet.Delimiter       := '_';
+    slLayerSet.NameValueSeparator := '~';
+    slLayerSet.StrictDelimiter := true;
+    ALayerSet := LayerSetUtils.CreateLayerSet.Include(Layer);
+    LSText := LayerSetutils.SerializeToString(ALayerSet);
+    slLayerset.DelimitedText := LSText;
+    Idx := -1;
+    Idx := slLayerSet.IndexofName('Standard.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Signal.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Dielectric.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Standard.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Internal.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Mechanical.Include');
+
+    if Idx > -1 then
+    begin
+        LSText := slLayerSet.ValueFromIndex(Idx);
+        slLayerLine := TStringList.Create;
+        slLayerLine.Delimiter          := ',';
+        slLayerLine.NameValueSeparator := '=';
+        slLayerLine.StrictDelimiter    := true;
+        slLayerLine.DelimitedText      := LSText;
+        if slLayerLine.Count > 0 then
+        begin
+            Result := sllayerLine.Names(slLayerLine.Count-1);
+        end;
+        if Result = '' then Result := 0;
+        slLayerLine.Free;
+    end;
+    slLayerSet.Free;
 end;
 
 {
