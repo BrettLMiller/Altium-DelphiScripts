@@ -449,7 +449,7 @@ begin
        end;  *)
         if Prim.ObjectId = eTrackObject then
         begin
-            Leng := Power((Prim.x2 - Prim.x1),2) * 1 + Power((Prim.y2 - Prim.y1),2) * 1;
+            Leng := Power((Prim.x2 - Prim.x1), 2) + Power((Prim.y2 - Prim.y1), 2);
             Leng := Int(Sqrt(Leng));
             RadiusList.AddObject(IntToStr(Leng), Prim);
             flag := 1;
