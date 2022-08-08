@@ -515,7 +515,6 @@ begin
         begin
             SubStack := MasterStack.SubStacks[i];
             TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
-            MasterStack;
             ReportSubStack(i, SubStack);
         end;
 
@@ -527,8 +526,6 @@ begin
             TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
             CheckShortMidLayerNames(i, SubStack);
         end;
-        
-
     end;
 
     TempS.Add('');
@@ -752,7 +749,7 @@ begin
     Idx := slLayerSet.IndexofName('Standard.Include');
     if Idx < 0 then Idx := slLayerSet.IndexofName('Signal.Include');
     if Idx < 0 then Idx := slLayerSet.IndexofName('Dielectric.Include');
-    if Idx < 0 then Idx := slLayerSet.IndexofName('Standard.Include');
+    if Idx < 0 then Idx := slLayerSet.IndexofName('Misc.Include');
     if Idx < 0 then Idx := slLayerSet.IndexofName('Internal.Include');
     if Idx < 0 then Idx := slLayerSet.IndexofName('Mechanical.Include');
 
@@ -766,7 +763,7 @@ begin
         slLayerLine.DelimitedText      := LSText;
         if slLayerLine.Count > 0 then
         begin
-            Result := sllayerLine.Names(slLayerLine.Count-1);
+            Result := slLayerLine.Names(slLayerLine.Count-1);
         end;
         if Result = '' then Result := 0;
         slLayerLine.Free;
