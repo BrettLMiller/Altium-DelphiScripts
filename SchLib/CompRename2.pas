@@ -1,10 +1,13 @@
 {.............................................................................
- SchLib CompRename2.pas
+ CompRename2.pas   SchLib or SchDoc
    rename component using the "Comment" parameter text.
-   Simple check for a unique name is made..
+   Check for a unique name in SchLib is made..
+   Breaks the component (symbol) vault connection to allow renaming
 
  Saves the original comp name to component parameter: "cCompNameParameter"
  Maybe useful for components from A365 (Vault) that originated in local file based libraries..
+
+ Does NOT remove the Model vault links.
 
  see Sch/CompVaultState.pas for disconnecting Comp & FP models from vault.
 
@@ -12,8 +15,9 @@
 
 
 Author BL Miller
-02/09/2021  v1.0 POC
-08/08/2022  v1.1 minor tweak around changing parameter.
+02/09/2021  v1.0  POC
+08/08/2022  v1.1  minor tweak around changing parameter.
+09/08/2022  v1.11 support SchDoc & break comp symbol vault link
 
 Note: current focused component (in SchLib) can NOT have its designator properties changed
       using Comp.Designator method. MUST use ISch_Parameter
@@ -25,11 +29,14 @@ const
 
 {..............................................................................}
 var
-    CurrentLib      : ISch_Lib;
+    Document    : IDocument;
+    CurrentLib  : ISch_Lib;
+    IsLib       : boolean;
 
 Function SchParameterFind( Component : ISch_Component, ParamName : String ) : ISch_Parameter;         forward;
 Function SchParameterAdd( Component : ISch_Component, ParamName : String, Value : String ) : Boolean; forward;
 Function SchParameterSet( Component : ISch_Component, ParamName : String, Value : String ) : Boolean; forward;
+function CheckLibCompName(SchLib : ISch_Lib, const CompName : WideString) : WideString;               forward;
 Procedure GenerateReport(Report : TStringList); forward;
 {..............................................................................}
 
@@ -42,93 +49,132 @@ Var
     LibComp         : ISch_Component;
     ReportInfo      : TStringList;
     CompName        : TString;
+    DesignItemId    : WideString;
     NewCompName     : TString;
     Comment         : TString;
-    NameList        : TStringList;
     NameSuffix      : WideString;
-    
+
 Begin
     If SchServer = Nil Then Exit;
+
     CurrentLib := SchServer.GetCurrentSchDocument;
     If CurrentLib = Nil Then Exit;
 
-    // check if the document is a schematic library and if not exit.
-    If CurrentLib.ObjectID <> eSchLib Then
-    Begin
-         ShowError('Please open a schematic library.');
+    if not ((CurrentLib.ObjectID = eSheet) or (CurrentLib.ObjectID = eSchLib)) Then
+    begin
+         ShowMessage('No SchDoc or SchLib selected. ');
          Exit;
-    End;
+    end;
+    IsLib := false;
+    if (CurrentLib.ObjectID = eSchLib) then
+        IsLib := true;
 
     // Create a TStringList object to store data
     ReportInfo := TStringList.Create;
     ReportInfo.Add('');
-    
-    NameList := TStringList.Create;
-        
+
     i := 1; j := 0;
 
-    LibraryIterator := CurrentLib.SchLibIterator_Create;
+    if IsLib then
+        LibraryIterator := CurrentLib.SchLibIterator_Create
+    else
+        LibraryIterator := CurrentLib.SchIterator_Create;
     LibraryIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
-    LibComp := LibraryIterator.FirstSchObject;
 
+    LibComp := LibraryIterator.FirstSchObject;
     While LibComp <> Nil Do
     Begin
-        CompName   := LibComp.LibReference;
-        Designator := LibComp.GetState_SchDesignator;
-        Comment    := LibComp.Comment.Text;
-        
+        DesignItemId := Libcomp.DesignItemId;
+        CompName     := DesignItemId;
+        if (IsLib) then
+            CompName := LibComp.LibReference;
+
+        Designator   := LibComp.GetState_SchDesignator;
+        Comment      := LibComp.Comment.Text;
+
+// if from Vault then must break to rename.
+        if LibComp.VaultGUID <> '' then
+        begin
+            LibComp.SetState_VaultGUID('');
+            LibComp.Setstate_SourceLibraryName('');
+            LibComp.UseLibraryName := false;
+        end;
+
 // backup the exisitng Name as a parameter
         SchParameterSet( LibComp, cCompNameParameter, CompName );
 
+        NewCompName := CompName;
+
 // rename compoment with Comment
-        NewCompName := Comment;
-        
 // blank comments are useless
-        if NewCompName = '' then
-            NewCompName := CompName;   
+        if Comment <> '' then
+            NewCompName := Comment;
 
-// check new name is unique        
+// check new name is unique in SchLib
         NameSuffix := '';
-        while (NameList.IndexOf(NewCompName + NameSuffix) > -1) do
+        if IsLib then
         begin
-            inc(j);
-            NameSuffix := '_' + IntToStr(j);
-            if J > 100 then break;
+            NewCompName := CheckLibCompName(CurrentLib, NewCompName);
         end;
-
-        NewCompName := NewCompName + NameSuffix;
-        NameList.Add(NewCompName);
 
         if (NewCompName <> CompName) then
         begin
-            SchServer.RobotManager.SendMessage(LibComp.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
+            LibComp.UpdatePart_PreProcess;
             LibComp.SetState_LibReference(NewCompName);
             LibComp.SetState_DesignItemId(NewCompName);
-            ReportInfo.Add(PadRight(IntToStr(i),3) + ' Existing Name, Ref.Des and Comment : ' + CompName + ' | ' + Designator.Text + ' | ' + Comment + '    New Name (unique):     ' + LibComp.LibReference );
-         // Send a system notification that component change in the library.
-            SchServer.RobotManager.SendMessage(LibComp.I_ObjectAddress, c_BroadCast, SCHM_EndModify, c_NoEventData);
+            LibComp.UpdatePart_PostProcess;
+
+            ReportInfo.Add(PadRight(IntToStr(i),3) + ' Existing Name, Ref.Des and Comment : ' + CompName + ' | ' + Designator.Text + ' | ' + Comment + '    New Name :     ' + LibComp.LibReference );
         end
-        else    
-            ReportInfo.Add(PadRight(IntToStr(i),3) + ' Existing Name, Ref.Des and Comment : ' + CompName + ' | ' + Designator.Text + ' | ' + Comment + '    NO Name change '); 
+        else
+            ReportInfo.Add(PadRight(IntToStr(i),3) + ' Existing Name, Ref.Des and Comment : ' + CompName + ' | ' + Designator.Text + ' | ' + Comment + '    NO Name change ');
 
         inc(i);
         LibComp := LibraryIterator.NextSchObject;
     End;
 
-    // we are finished fetching symbols of the current library.
+    LibComp := LibraryIterator.FirstSchObject;
+
     CurrentLib.SchIterator_Destroy(LibraryIterator);
 
-    CurrentLib.UpdateDisplayForCurrentSheet;
     CurrentLib.GraphicallyInvalidate;
     // Set the document dirty.
     Client.GetCurrentView.OwnerDocument.Modified := True;
 
-    NameList.Clear;
+    if IsLib then
+        CurrentLib.UpdateDisplayForCurrentSheet;
 
     GenerateReport(ReportInfo);
     ReportInfo.Free;
 End;
 {..............................................................................}
+function CheckLibCompName(SchLib : ISch_Lib, const CompName : WideString) : WideString;
+var
+    CompLoc     : WideString;
+    NewCompName : Widestring;
+    Iterator    : ISch_Iterator;
+    Comp        : ISch_Component;
+    found       : boolean;
+    Cnt : integer;
+begin
+    Result := CompName;
+    Cnt := 1;
+    NewCompName := CompName;
+
+    repeat
+        found := false;
+
+        if SchLib.GetState_SchComponentByLibRef(NewCompName) <> nil then
+            found := true;
+        if found then
+            NewCompName := CompName + '_' + IntToStr(Cnt); // IncrementStringasText('a_1', '1');
+
+        inc(Cnt);
+    until (Cnt > 10) or (not found);
+
+    Result := NewCompName;
+end;
+
 Procedure GenerateReport(Report : TStringList);
 Var
     Document : IServerDocument;
@@ -209,10 +255,11 @@ Begin
     Parameter.OwnerPartId := Component.CurrentPartID;
     Parameter.OwnerPartDisplayMode := Component.DisplayMode;
 
-//  if in SchDoc
-//    Component.AddSchObject( Parameter );
-//    SchServer.RobotManager.SendMessage( Component.I_ObjectAddress, c_BroadCast, SCHM_PrimitiveRegistration, Parameter.I_ObjectAddress );
-
+    if (not IsLib) then
+    begin
+//        Component.AddSchObject( Parameter );
+        SchServer.RobotManager.SendMessage( Component.I_ObjectAddress, c_BroadCast, SCHM_PrimitiveRegistration, Parameter.I_ObjectAddress );
+    end;
     Component.UpdatePart_PostProcess;
 
     Result := True;
