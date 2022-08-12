@@ -55,8 +55,8 @@ IDocumentOptionsSet    // interesting, but does not seem useful.
 const
     cRegistrySubPath = '\DesignExplorer\Preferences\';            // registry path to prefs from AD-install root.
 
-    cNameOfServer = 'Client';               // works
-//    cSectionNamesExport = 'Access|Client Preferences|Options Pages|Custom Colors';         // "Option Pages" should be useful
+    cNameOfServer = 'Client';
+//    cSectionNamesExport = 'Access|Client Preferences|Options Pages|Custom Colors'; 
     cSectionNamesExport = 'Custom Colors';
     cSectionNamesImport = 'Custom Colors';
 
@@ -143,10 +143,10 @@ Begin
     end;
 
     OpenDialog        := TOpenDialog.Create(Application);
-    OpenDialog.Title  := 'Import ' + cNameOfServer + ' Options *.ini file';
+    OpenDialog.Title  := 'Import ' + cNameOfServer + '_' + cSectionNamesImport + ' *.ini file';
     OpenDialog.Filter := 'INI file (*.ini)|*.ini';
 //    OpenDialog.InitialDir := ExtractFilePath(Board.FileName);
-    OpenDialog.FileName := cNameOfServer + '*.ini';
+    OpenDialog.FileName := cNameOfServer + '_' + cSectionNamesImport + '*.ini';
     Flag := OpenDialog.Execute;
     if (Flag = 0) then exit;
     FileName := OpenDialog.FileName;
@@ -177,7 +177,7 @@ Begin
                 intValue := StrToInt(KeyValue);
                 if (IntValue < 0)       then IntValue := 0;
                 if (IntValue > $FFFFFF) then IntValue := $FFFFFF;
-                
+
 // write to Server Options
                 Writer.WriteInteger(SectName, KeyName, IntValue);
 // write to Registry
@@ -225,10 +225,10 @@ Begin
     end;
 
     SaveDialog        := TSaveDialog.Create(Application);
-    SaveDialog.Title  := 'Export ' + cNameOfServer + ' Options *.ini file';
+    SaveDialog.Title  := 'Export ' + cNameOfServer + '_' + cSectionNamesExport + ' *.ini file';
     SaveDialog.Filter := 'INI file (*.ini)|*.ini';
-    FileName := cNameOfServer + '_Options.ini';  // ExtractFilePath(Board.FileName);
-    SaveDialog.FileName := FileName;            // ChangeFileExt(FileName, '');
+    FileName := cNameOfServer + '_' + cSectionNamesExport + '.ini';
+    SaveDialog.FileName := FileName;
 
     Flag := SaveDialog.Execute;
     if (Flag = 0) then exit;
@@ -301,4 +301,3 @@ Begin
             ReportDoc.DoFileLoad;
     end;
 end;
-
