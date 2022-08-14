@@ -22,6 +22,7 @@ Note:
 B.L Miller
 11/08/2022  v0.11  POC
 12/08/2022  v0.12  use hex in inifile to ease RGB readability. Sanitise input values from inifile.
+14/08/2022  v0.13  pop up the Colour form dialog
 
 IOptionsWriter methods              IOptionsWriter properties
    EraseSection
@@ -128,6 +129,7 @@ Var
     intValue       : Integer;
     RegSectKey     : WideString;
     RegItemKey     : WideString;
+    Button         : WideString;
     bSuccess       : boolean;
 
 Begin
@@ -174,6 +176,7 @@ Begin
                 KeyValue := SectKeys.ValueFromIndex(I);
 
 // hex or int string to int & sanitise
+                if KeyValue = ''        then KeyValue :='0';
                 intValue := StrToInt(KeyValue);
                 if (IntValue < 0)       then IntValue := 0;
                 if (IntValue > $FFFFFF) then IntValue := $FFFFFF;
@@ -198,7 +201,26 @@ Begin
     client.SetPreferencesChanged(true);
     Client.GUIManager.UpdateInterfaceState;
 
-    ShowMessage('Close & reopen Altium to get new colours, sorry..');
+    bSuccess := false;
+    ResetParameters;
+    AddStringParameter('Dialog','Color');
+//   AddStringParameter('Color', '0');
+    RunProcess('Client:RunCommonDialog');
+    
+// non blocking & no return value then causes DLL crash ???
+//    Client.SendMessage('Client:RunCommonDialog', 'Dialog=Color', 512, Client.CurrentView);
+// DNW
+//    Server.CommandLauncher.LaunchCommand('Client:RunCommonDialog', 'Dialog=Color', 512,Client.CurrentView);
+
+    GetStringParameter('Result', Button);
+    if (Button = 'True') then
+    begin
+        bSuccess := true;
+        GetStringParameter('Color',KeyValue);
+//        ShowInfo('New color is ' + KeyValue);
+    End;
+    if not bSuccess then
+        ShowMessage('Close & reopen Altium to get new colours, sorry..');
 End;
 
 procedure ExportCustomColours;
