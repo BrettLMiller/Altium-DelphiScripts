@@ -27,12 +27,14 @@
  21/04/2022 0.60  support PcbLib single LayerStack.
  22/04/2022 0.61  sub-stack regions appear to be (2) possible kinds. Hacky soln.
  22/07/2022 0.62  very hacky soln to get the CamView gerber layer name-numbers.
+ 17/08/2022 0.63  Add drill layer pairs & add mechlayer kind text
 
          tbd : find way to fix short & mid names if wrong.
                 Use Layer Classes test in AD17 & AD19
                 get the matching stack region names for each substack.
                 IPCB_BoardRegionManager
                 ILayerStackProvider / ILayerStackInfo / GUID
+                Not convinced about Board.LayerPositionInSet(AllLayers, LayerObj) as TV6_LayerSet junk.
 
 More crappy Altium mess.
 
@@ -73,9 +75,12 @@ var
 
 function LayerClassName (LClass : TLayerClassID) : WideString;                  forward;
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;       forward;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;                forward;
 function Version(const dummy : boolean) : TStringList;                          forward;
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack;, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
 function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;  forward;
+procedure ReportDrillPairs(Board : IPCB_Board, SubStack : IPCB_LayerStack); forward;
+function DrillTypeToStr(DType : TDrillLayerPairType) : Widestring;    forward;
 
 // WIP
 function IsInLayerClass(LayerObj : IPCB_LayerObject, LClass : TLayerClassID) : boolean;
@@ -362,35 +367,36 @@ begin
             if IsSignal or LayerUtils.IsElectricalLayer(Layer) or IsPlane then
             begin
                 Copper    := LayerObj;
-                    Thick     := Copper.CopperThickness;
-                    Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
-                //  think this only applies to eLayerClass_Electrical
-                    LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));
+                Thick     := Copper.CopperThickness;
+                Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
+                DieMatl := 'foil';
+            //  think this only applies to eLayerClass_Electrical
+                LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));
             end
             else if (Layer = eTopPaste) or (Layer = eBottomPaste) then
             begin
-                    LayerObj.Name ;             // TPasteMaskLayerAdapter()
-                    Thick     := LayerObj.CopperThickness;   // nonsense default value
-                    Thick     := MilsToCoord(cPasteThick);
-                    Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
+                LayerObj.Name ;             // TPasteMaskLayerAdapter()
+                Thick     := LayerObj.CopperThickness;   // nonsense default value
+                Thick     := MilsToCoord(cPasteThick);
+                Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
             end
             else if (Layer = eTopOverlay) or (Layer = eBottomOverlay) then
             begin
-                    Thick     := MilsToCoord(0.2);
-                    Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
-                    LayerObj.Name;
+                 Thick     := MilsToCoord(0.2);
+                 Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
+                 LayerObj.Name;
             end
             else
             begin   // dielectrics     eSurface eCore ePrepreg
-                    Dielectric := LayerObj;  // .Dielectric Tv6
-                    DieType    := kDielectricTypeStrings(Dielectric.DielectricType);
-                    if (Dielectric.DielectricType = eSurfaceMaterial) then DieType := 'Surface';
-                    if Dielectric.DielectricType = eCore then DieType := 'Core';
-                    Thick     :=  Dielectric.DielectricHeight;
-                    Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
+                 Dielectric := LayerObj;  // .Dielectric Tv6
+                 DieType    := kDielectricTypeStrings(Dielectric.DielectricType);
+                 if (Dielectric.DielectricType = eSurfaceMaterial) then DieType := 'Surface';
+                 if Dielectric.DielectricType = eCore then DieType := 'Core';
+                 Thick     :=  Dielectric.DielectricHeight;
+                 Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
 
-                    DieMatl   := Dielectric.DielectricMaterial;
-                    DieConst  := FloatToStr(Dielectric.DielectricConstant);
+                 DieMatl   := Dielectric.DielectricMaterial;
+                 DieConst  := FloatToStr(Dielectric.DielectricConstant);
             end;
 
          // sum class Physical thickness but do not sum pastemask..
@@ -423,7 +429,6 @@ begin
 
     TempS.Add('');
     TempS.Add('Sub Stack ' + IntToStr(StackIndex + 1) + ': Total Thickness : ' + CoordUnitToStringWithAccuracy(ToTThick, eMetric, 3, 4) );
-    TempS.Add('');
 end;
 
 Procedure LayerStackInfoTest;
@@ -516,6 +521,10 @@ begin
             SubStack := MasterStack.SubStacks[i];
             TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
             ReportSubStack(i, SubStack);
+            TempS.Add('');
+
+            ReportDrillPairs(Board, SubStack);
+            TempS.Add('');
         end;
 
         if (cCheckLayerNames) then
@@ -525,9 +534,11 @@ begin
             TempS.Add('Checking short & mid layer names ');
             TempS.Add('Sub Stack ' + IntToStr(i + 1) + '  name: ' + SubStack.Name + '  ID: ' + SubStack.ID);
             CheckShortMidLayerNames(i, SubStack);
+            TempS.Add('');
         end;
     end;
 
+    TempS.Add('');
     TempS.Add('');
     TempS.Add('API Layers constants: (all obsolete)');
     TempS.Add('MaxRouteLayer = ' +  IntToStr(MaxRouteLayer) +' |  MaxBoardLayer = ' + IntToStr(MaxBoardLayer) );
@@ -536,7 +547,7 @@ begin
     TempS.Add('');
     TempS.Add(' ----- Mechanical Layers ------');
     TempS.Add('');
-    TempS.Add('idx  LayerID   boardlayername       layername           short mid            long             kind  UsedByPrims ');
+    TempS.Add('idx  LayerID   boardlayername       layername           short mid            long             kind              UsedByPrims ');
 
     i := 0;
     LIterator := Board.MechanicalLayerIterator;
@@ -578,7 +589,7 @@ begin
 
         TempS.Add(PadRight(IntToStr(i), 3) + PadRight(Layer, 10) + ' ' + PadRight(Board.LayerName(Layer), 20)
                   + ' ' + PadRight(LayerName, 20) + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 20)
-                  + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true),8)  + ' GI:' + IntToStr(LSLIndex) + ':' + IntToHex(LSLIndex,7) );
+                  + ' ' + PadRight(LayerKindToStr(MechLayerKind),18) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true),8)  + ' GI:' + IntToStr(LSLIndex) + ':' + IntToHex(LSLIndex,7) );
     end;
 
     TempS.Add('');
@@ -620,7 +631,7 @@ begin
         LowLayer  := LayerStack.LayerObject_V7[ML1];
         HighLayer := LayerStack.LayerObject_V7[ML2];       // PCBLayerPair.HighLayer
         LowPos    := Board.LayerPositionInSet(MkSet(MechanicalLayers), LowLayer);
-        HighPos   := Board.LayerPositionInSet(MkSet(MechanicalLayers), ML2);
+        HighPos   := Board.LayerPositionInSet(MkSet(MechanicalLayers), HighLayer);
 
         If LowPos <= HighPos Then
             LayerPairs.Add(LowLayer.Name + ' - ' + HighLayer.Name)
@@ -643,6 +654,7 @@ try:-
     end;
 
     FileName := GetWorkSpace.DM_FocusedDocument.DM_FullPath;
+    if ExtractFilePath(FileName) = '' then FileName := SpecialFolder_Temporary;
     FileName := ExtractFilePath(FileName) + '\layerstacktests.txt';
 
     TempS.SaveToFile(FileName);
@@ -676,7 +688,7 @@ begin
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
-function LayerPairKindToStr(LayerStack  : IPCB_LayerStack_V7, LPK : TMechanicalLayerPairKind) : WideString;
+function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;
 begin
     case LPK of
     NoMechLayerKind : Result := 'Not Set';            // single
@@ -691,6 +703,42 @@ begin
     9               : Result := 'Gold Plating';
     10              : Result := 'Value';
     11              : Result := '3D Body';
+    else              Result := 'Unknown'
+    end;
+end;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;
+begin
+    case LK of
+    NoMechLayerKind : Result := 'Not Set';            // single
+    1               : Result := 'Assembly Top';
+    2               : Result := 'Assembly Bottom';
+    3               : Result := 'Assembly Notes';     // single
+    4               : Result := 'Board';
+    5               : Result := 'Coating Top';
+    6               : Result := 'Coating Bottom';
+    7               : Result := 'Component Center Top';
+    8               : Result := 'Component Center Bottom';
+    9               : Result := 'Component Outline Top';
+    10              : Result := 'Component Outline Bottom';
+    11              : Result := 'Courtyard Top';
+    12              : Result := 'Courtyard Bottom';
+    13              : Result := 'Designator Top';
+    14              : Result := 'Designator Bottom';
+    15              : Result := 'Dimensions';         // single
+    16              : Result := 'Dimensions Top';
+    17              : Result := 'Dimensions Bottom';
+    18              : Result := 'Fab Notes';         // single
+    19              : Result := 'Glue Points Top';
+    20              : Result := 'Glue Points Bottom';
+    21              : Result := 'Gold Plating Top';
+    22              : Result := 'Gold Plating Bottom';
+    23              : Result := 'Value Top';
+    24              : Result := 'Value Bottom';
+    25              : Result := 'V Cut';             // single
+    26              : Result := '3D Body Top';
+    27              : Result := '3D Body Bottom';
+    28              : Result := 'Route Tool Path';   // single
+    29              : Result := 'Sheet';             // single
     else              Result := 'Unknown'
     end;
 end;
@@ -769,6 +817,77 @@ begin
         slLayerLine.Free;
     end;
     slLayerSet.Free;
+end;
+
+procedure ReportDrillPairs(Board : IPCB_Board, SubStack : IPCB_LayerStack);
+Var
+    i            : Integer;
+    DLayerPair   : IPCB_DrillLayerPair;
+    DrillType    : TDrillLayerPairType;
+    StartLayer   : IPCB_LayerObject;
+    StopLayer    : IPCB_LayerObject;
+
+    LowLayerObj  : IPCB_LayerObject;
+    HighLayerObj : IPCB_LayerObject;
+    LowPos       : Integer;
+    HighPos      : Integer;
+    CounterHole  : boolean;
+    BackDrill    : boolean;
+    Inverted     : boolean;
+Begin
+//        IPCB_board.GetState_LayerPairByPair();
+
+    TempS.Add('Drill Pairs                              Type   Back  Counter ');
+    For i := 0 To (Board.DrillLayerPairsCount - 1) Do
+    Begin
+        DLayerPair  := Board.LayerPair[i];
+
+        if not DLayerPair.IsdefinedIn(SubStack.ID) then continue;
+
+//        TempS.Add(DLayerPair.Substacks_ToString);
+
+        Inverted := false; DrillType := eDrilledHole; CounterHole := false;
+        if not LegacyMLS then
+        begin
+            DrillType   := DLayerPair.DrillLayerPairType;
+            CounterHole := DLayerPair.IsCounterHole;
+            Inverted    := DLayerPair.Inverted;
+        end;
+        Backdrill   := DLayerPair.IsBackdrill;
+
+        if not Inverted then
+        begin
+            StartLayer := DLayerPair.StartLayer;
+            StopLayer  := DLayerPair.StopLayer;
+        end else
+        begin
+            StopLayer  := DLayerPair.StartLayer;
+            StartLayer := DLayerPair.StopLayer;
+        end;
+        LowLayerObj  := SubStack.LayerObject[DLayerPair.LowLayer];
+        HighLayerObj := SubStack.LayerObject[DLayerPair.HighLayer];
+
+        LowPos       := Board.LayerPositionInSet(SetUnion( SignalLayers, InternalPlanes), StartLayer);
+        HighPos      := Board.LayerPositionInSet(SetUnion(SignalLayers, InternalPlanes), StopLayer);
+
+        TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(LowPos)  + ':' + StartLayer.Name  + ' - ' + IntToStr(HighPos) + ':' + StopLayer.Name
+                  +  ' ' + DrillTypeToStr(DrillType) + ' '+BoolToStr(BackDrill,true) + ' ' + BooltoStr(CounterHole, true) );
+//        If LowPos <= HighPos Then
+//            TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(LowPos)  + ':' + LowLayerObj.Name  + ' - ' + IntToStr(HighPos) + ':' + HighLayerObj.Name)
+//        Else
+//            TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(HighPos) + ':' + HighLayerObj.Name + ' - ' + IntToStr(LowPos)  + ':' + LowLayerObj.Name);
+    End;
+End;
+
+function DrillTypeToStr(DType : TDrillLayerPairType) : Widestring;
+begin
+   Result := 'unknown';
+   case Dtype of
+      eDrilledHole       : Result := 'MechDrill';
+      eLaserDrilledHole  : Result := 'Laser';
+      ePunchedHole       : Result := 'Punched';
+      ePlasmaDrilledHole : Result := 'Plasma';
+   end;
 end;
 
 {
