@@ -23,6 +23,7 @@ B.L Miller
 11/08/2022  v0.11  POC
 12/08/2022  v0.12  use hex in inifile to ease RGB readability. Sanitise input values from inifile.
 14/08/2022  v0.13  pop up the Colour form dialog
+18/08/2022  v0.14  registry path was missing server name.
 
 IOptionsWriter methods              IOptionsWriter properties
    EraseSection
@@ -184,7 +185,7 @@ Begin
 // write to Server Options
                 Writer.WriteInteger(SectName, KeyName, IntValue);
 // write to Registry
-                RegSectKey := SpecialKey_SoftwareAltiumApp + cRegistrySubPath + SectName;
+                RegSectKey := SpecialKey_SoftwareAltiumApp + cRegistrySubPath + cNameOfServer + '\' + SectName;
                 bSuccess := RegistryWriteInteger(RegSectKey, KeyName, IntValue);
             end;
         end
