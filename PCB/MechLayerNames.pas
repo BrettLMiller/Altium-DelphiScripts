@@ -38,7 +38,8 @@ LayerKinds & LayerPairKinds are best guess & the associated text is user defined
                  Export over an existing file with user Yes/No prompt.
  24/08/2021 1.43 Added UnPairCurrentMechLayer()
  22/08/2022 1.44 Export: Board-LayerColor() colours are stale/wrong*1, use PCB SystemOption. Add 'Board Shape' const.
-                 Import: Alium rearanges layer names when creating a pair; Force our layer names
+                 Import: Altium rearranges layer names when creating a pair; Force our layer names
+ 23/08/2022 1.45 try simplify process flow for import. Add LayerID to export & best guess for PairKinds.
 
 
   TMechanicalLayerToKindItem
@@ -57,13 +58,13 @@ const
     NoMechLayerKind   = 0;        // enum const does not exist for AD17/18
     ctTop             = 'Top';    // text used denote mech layer kind pairs.
     ctBottom          = 'Bottom';
+    cNumPairKinds     = 12;        // number of layerpair kinds (inc. "Not Set")
 
 var
     PCBSysOpts        : IPCB_SystemOptions;
     Board             : IPCB_Board;
     LayerStack        : IPCB_LayerStack_V7;
     LayerObj_V7       : IPCB_LayerObject_V7;
-    MechLayer         : IPCB_MechanicalLayer;
     MLayerKind        : TMechanicalLayerKind;
     MLayerPairKind    : TMechanicalLayerPairKind;
     MLayerKindStr     : WideString;
@@ -76,19 +77,22 @@ var
     FileName      : String;
     INIFile       : TIniFile;
     Flag          : Integer;
-    ML1, ML2      : integer;
-    i, j          : Integer;
     LegacyMLS     : boolean;
 
-function Version(const dummy : boolean) : TStringList;                     forward;
-function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;  forward;
-function LayerStrToPairKind(LPKS : WideString) : TMechanicalLayerPairKind; forward;
-function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;           forward;
-function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;          forward;
+function Version(const dummy : boolean) : TStringList;                      forward;
+function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;   forward;
+function LayerStrToPairKind(LPKS : WideString) : TMechanicalLayerPairKind;  forward;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;            forward;
+function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;           forward;
+function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
+function FindUsedPairKinds(MLPS : IPCB_MechanicalLayerPairs) : TStringList;                 forward;
+function GuessLayerPairKind(MLayerKind : TMechanicalLayerKind) : TMechanicalLayerPairKind; forward;
 {.........................................................................................................}
 
 Procedure UnPairCurrentMechLayer;
 var
+    ML1       : integer;
+    i         : Integer;
     CurrLayer : TLayer;
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -121,10 +125,15 @@ end;
 
 Procedure ExportMechLayerInfo;
 var
+    MechLayer        : IPCB_MechanicalLayer;
     SaveDialog       : TSaveDialog;
     dConfirm         : boolean;
     slMechLayerPairs : TStringList;
+    slUsedPairKinds  : TStringList;
+    ML1, ML2         : integer;
+    i, j             : Integer;
     sColour          : WideString;
+    bHasPairKinds    : boolean;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -136,6 +145,7 @@ begin
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
+    bHasPairKinds := false;
     if (StrToInt(VerMajor) >= AD19VersionMajor) then
     begin
         LegacyMLS     := false;
@@ -166,8 +176,11 @@ begin
 
     BeginHourGlass(crHourGlass);
 
-    LayerStack     := Board.LayerStack_V7;
-    MechLayerPairs := Board.MechanicalPairs;
+    LayerStack       := Board.LayerStack_V7;
+    MechLayerPairs   := Board.MechanicalPairs;
+//    slMechLayerPairs := FindAllMechPairLayers(LayerStack, MechLayerPairs);
+    slUsedPairKinds  := FindUsedPairKinds(MechLayerPairs);
+    if slUsedPairKinds.Count > 0 then bHasPairKinds := true;
 
     for i := 1 to MaxMechLayers do
     begin
@@ -177,12 +190,15 @@ begin
         if (i <= AllLayerDataMax) or MechLayer.MechanicalLayerEnabled then
         begin
             MLayerKind := NoMechLayerKind;
-            if not LegacyMLS then MLayerKind := MechLayer.Kind;
+            if not LegacyMLS then
+                MLayerKind := MechLayer.Kind;
             MLayerKindStr := LayerKindToStr(MLayerKind);
+
 // Board.LayerColor[ML1] are wrong or stale.
             sColour := ColorToString( PCBSysOpts.LayerColors(ML1) );
 
             IniFile.WriteString('MechLayer' + IntToStr(i), 'Name',    Board.LayerName(ML1) );       // MechLayer.Name);
+            IniFile.WriteString('MechLayer' + IntToStr(i), 'Layer',   IntToStr(ML1) );              // MechLayer.Layer);
             IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
             IniFile.WriteString('MechLayer' + IntToStr(i), 'Kind',    MLayerKindStr);
             IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
@@ -199,23 +215,34 @@ begin
 // can NOT determine the LayerPair layers from PairIndex because TMechanicalLayerPair wrapper is borked so can NOT determine the PairKinds.
 // if only .PairDefined(L1,L2) had returned the PairIndex instead of boolean.
 // but then NO guarantee ML1 is comp top or bottom side!
+
+// make a guess for PairKind from single layer Kind.
                     MLayerPairKindStr := LayerPairKindToStr(NoMechLayerKind);
-                    IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair',     Board.LayerName(ML2) );
-                    IniFile.WriteString('MechLayer' + IntToStr(i), 'PairKind', MLayerPairKindStr );
+// don't assume a pair kind unless they are already used in PcbDoc.
+                    if bHasPairKinds then
+                    begin
+                        MLayerPairKindStr := LayerPairKindToStr( GuessLayerPairKind(MLayerKind) );
+                        if (slUsedPairKinds.IndexOf(MLayerPairKindStr) < 0) then
+                            MLayerPairKindStr := LayerPairKindToStr(NoMechLayerKind);
+                    end;
+
+                    IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair',      Board.LayerName(ML2) );
+                    IniFile.WriteString('MechLayer' + IntToStr(i), 'PairLayer', IntToStr(ML2) );
+                    IniFile.WriteString('MechLayer' + IntToStr(i), 'PairKind',  MLayerPairKindStr );
                 end;
             end;
         end;
     end;
     IniFile.Free;
     EndHourGlass;
-    ShowMessage('Warning: LayerPair Kinds can NOT be exported, only imported.' + #13
-                +'  user has to edit inifile PairKind values using Altium labels');
+    ShowMessage('Warning: LayerPair Kinds are ONLY a best guess. ' + #13
+                +' Check the inifile PairKind values. ');
 end;
-
 
 Procedure ImportMechLayerInfo;
 var
     OpenDialog         : TOpenDialog;
+    MechLayer          : IPCB_MechanicalLayer;
     MechLayer2         : IPCB_MechanicalLayer;
     MPairLayer         : WideString;
     MLayerKind2        : TMechanicalLayerKind;
@@ -225,6 +252,8 @@ var
     LayerName1         : WideString;
     LayerName2         : WideString;
     LColour            : TColor;
+    ML1, ML2           : integer;
+    i, j               : Integer;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -257,6 +286,33 @@ begin
     LayerStack     := Board.LayerStack_V7;
     MechLayerPairs := Board.MechanicalPairs;
 
+// remove any existing pairs connected to all layers listed in inifile.
+// set all new layer names
+    for i := 1 To MaxMechLayers do
+    begin
+        ML1 := LayerUtils.MechanicalLayer(i);
+
+        if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
+        begin
+            MechLayer := LayerStack.LayerObject_V7[ML1];
+            LayerName1 := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name', 'eMech' + IntToStr(i));
+            MechLayer.Name := LayerName1;
+
+            for j := (i + 1) to MaxMechLayers do
+            begin
+                if i = j then continue;
+
+                ML2 := LayerUtils.MechanicalLayer(j);
+//        remove any pair including backwards ones !
+                if MechLayerPairs.PairDefined(ML2, ML1) then
+                    MechLayerPairs.RemovePair(ML2, ML1);
+                if MechLayerPairs.PairDefined(ML1, ML2) then
+                    MechLayerPairs.RemovePair(ML1, ML2);
+            end;
+        end;
+    end;
+
+// add single settings & new pairs
     for i := 1 To MaxMechLayers do
     begin
         MLayerKind := NoMechLayerKind;
@@ -288,47 +344,53 @@ begin
             if not LegacyMLS then
                 MechLayer.Kind  := MLayerKind;
 
-//    remove existing mechlayerpairs & add new ones.
-//    potentially new layer names in this file are of mech layer pair; only check parsed ones.
-            for j := 1 to (i - 1) do
+//    ignore already processed layers.
+            for j := (i + 1) to MaxMechLayers do
             begin
-                if not IniFile.SectionExists('MechLayer' + IntToStr(j)) then continue;
+                if i = j then continue;
 
-                MechPairIdx        := -1;
-                ML2                := LayerUtils.MechanicalLayer(j);
-                MechLayer2         := LayerStack.LayerObject_V7(ML2);
-                LayerName2         := IniFile.ReadString('MechLayer' + IntToStr(j), 'Name', 'eMech' + IntToStr(j));
+                MLayerKind2     := NoMechLayerKind;
+                MLayerPairKind2 := NoMechLayerKind;
+                ML2             := LayerUtils.MechanicalLayer(j);
+                MechLayer2      := LayerStack.LayerObject_V7(ML2);
+
+                LayerName2         := IniFile.ReadString('MechLayer' + IntToStr(j), 'Name', 'Mechanical ' + IntToStr(j));
                 MLayerKindStr2     := IniFile.ReadString('MechLayer' + IntToStr(j), 'Kind',      LayerKindToStr(NoMechLayerKind) );
                 MLayerPairKindStr2 := IniFile.ReadString('MechLayer' + IntToStr(j), 'PairKind',  LayerPairKindToStr(NoMechLayerKind) );
                 MLayerKind2        := LayerStrToKind(MLayerKindStr2);
                 MLayerPairKind2    := LayerStrToPairKind(MLayerPairKindStr2);
 
-//        remove pair including backwards ones !
-                if MechLayerPairs.PairDefined(ML2, ML1) then
-                    MechLayerPairs.RemovePair(ML2, ML1);
-                if MechLayerPairs.PairDefined(ML1, ML2) then
-                    MechLayerPairs.RemovePair(ML1, ML2);
+//    if 2nd of the pair is not listed in initfile
+//                if not IniFile.SectionExists('MechLayer' + IntToStr(j)) then
+//                begin
+//                     use new Layer number
+//                end;
 
 // does ML2 name (from file) match ML1 paired layer name
-                if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML2, ML1) then
-                    MechPairIdx := MechLayerPairs.AddPair(ML2, ML1);    // yes, intentional (j, i)
+                MechPairIdx        := -1;
+                if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML1, ML2) then
+                    MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)
 
                 if not LegacyMLS then
                 begin
-                    MechLayer2.Kind  := MLayerKind2;
+                    MechLayer2.Kind := MLayerKind2;
                     if (MechPairIdx > -1) then
-                    if MLayerPairKind > NoMechLayerKind then
-                    if MLayerPairKind = MLayerPairKind2 then
                     begin
                         MechLayerPair := MechLayerPairs.LayerPair(MechPairIdx);
                         MechLayerPairs.LayerPairKind(MechPairIdx) := MLayerPairKind;
                     end;
+
+                    if MLayerPairKind <> MLayerPairKind2 then
+                        ShowMessage('mismatch pair kinds ' + LayerName1 + '---' + LayerName2);
                 end;
 
 // Creating pairs automatically changes the names to Top & Bottom keywords first!
 // Altium tries to force/dictate its naming convention Top Bottom first so rewrite our names.
-                MechLayer.Name  := LayerName1;
-                MechLayer2.Name := LayerName2;
+                if (MechPairIdx > -1) then
+                begin
+                    MechLayer.Name  := LayerName1;
+                    MechLayer2.Name := LayerName2;
+                end;
             end;
         end; // section exists
     end;
@@ -340,6 +402,11 @@ begin
 end;
 
 Procedure ConvertMechLayerKindToLegacy;
+var
+    MechLayer  : IPCB_MechanicalLayer;
+    ML1        : integer;
+    i          : Integer;
+
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
@@ -364,7 +431,7 @@ begin
 
 // Could check a "PairKind" pair does have legacy "Pair" set..
 // MechLayerPairs.PairKind(index) ; need index ?? no solution.. can not do this.
-    for I:= 0 to (MechLayerPairs.Count - 1) do
+    for i:= 0 to (MechLayerPairs.Count - 1) do
     begin
         MechLayerPair := MechLayerPairs.LayerPair(i);
         MechLayerPairs.SetState_LayerPairKind(i) := NoMechLayerKind;
@@ -478,11 +545,82 @@ begin
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
+function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
+// is this list always in the same order as MechanicalPairs ??
+// no it is NOT & higher layer number can be top side layer !!
+var
+    MechLayer1    : IPCB_MechanicalLayer;
+    MechLayer2    : IPCB_MechanicalLayer;
+    ML1, ML2      : integer;
+    i, j          : Integer;
+begin
+    Result := TStringList.Create;
+    Result.StrictDelimiter := true;
+    Result.Delimiter := '|';
+    Result.NameValueSeparator := '=';
+
+    for i := 1 to MaxMechLayers do
+    begin
+        ML1        := LayerUtils.MechanicalLayer(i);
+        MechLayer1 := LayerStack.LayerObject_V7(ML1);
+
+        if MechLayer1.MechanicalLayerEnabled then
+        begin
+            for j := (i + 1) to MaxMechLayers do
+            begin
+                ML2        := LayerUtils.MechanicalLayer(j);
+                MechLayer2 := LayerStack.LayerObject_V7(ML2);
+                if MechLayer2.MechanicalLayerEnabled then
+                if MLPS.PairDefined(ML1, ML2) then
+//                if (MLPS.LayerUsed(ML1) and MLPS.LayerUsed(ML2)) then
+                    Result.Add(IntToStr(ML1) + '=' + IntToStr(ML2));
+            end;
+        end;
+    end;
+end;
+
+function FindUsedPairKinds(MLPS : IPCB_MechanicalLayerPairs) : TStringList;
+var
+    i        : integer;
+    PairKind : TMechanicalLayerPairKind;
+begin
+    Result := TStringList.Create;
+    Result.Duplicates := dupIgnore;
+    if LegacyMLS then exit;
+
+    for i:= 0 to (MLPS.Count - 1) do
+    begin
+        PairKind := MLPS.LayerPairKind(i);
+        Result.Add(LayerPairKindToStr(PairKind));
+    end;
+end;
+
+function GuessLayerPairKind(MLayerKind : TMechanicalLayerKind) : TMechanicalLayerPairKind;
+var
+    MLayerKindStr : WideString;
+    MLPK          : WideString;
+    I             : integer;
+begin
+    Result        := NoMechLayerKind;
+    MLayerKindStr := LayerKindToStr(MLayerKind);
+    for I := 0 to cNumPairKinds do
+    begin
+        MLPK := LayerPairKindToStr(I);
+        if (MLPK <> '') and (MLPK <> ' ') then
+        if ansipos(MLPK, MLayerKindStr) > 0 then
+        begin
+            Result := I;
+            break;
+        end;    
+    end;
+end;
+                   
 // unused fn
 function GetMechLayerPairKind(LKS : WideString) : TMechanicalLayerPairKind;
 // RootKind : basename of layer kind (Assembly Top, Coating, Courtyard etc)
 var
     WPos : integer;
+    I    : integer;
 begin
     Result := -1;
 // must contain top or bottom
