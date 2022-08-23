@@ -9,16 +9,21 @@
  Modified by : B. Miller
 
 Until TMechanicalLayerPair is solved..
-Can NOT correctly/completely export the Layer Pair but CAN import them.. so user has to edit the ini file
-to set the top & bottom properties of the layer pair & set the PairKind.
+Export: Can ONLY guess the Layer PairKind from LayerKinds & only assume Top & Bottom..
+        User has to check/edit the ini file for the layer pair & set the PairKind.
+Import: Can import Kinds PairKinds Top is always assumed at lower layer index than Bottom (listed first)
 
+Legacy fallback for AD17/18; drop ML "kind" & MLPairKind but retain pairings & names etc.
+
+TBD:
+  explicit definition of top & bottom of each pair.
+
+Notes:
 *1 Board.LayerColor() strings are not right with AD21.
 
  AD21 Layer UI "Create CompLayer Pair" grabs the first free layers & then after you select target mech layer pair numbers..
       it leaves the defaults with same new mech layer names!!  At least they are not pairs!
 
-Notes: Legacy fallback for AD17/18; drop ML "kind" & MLPairKind but retain pairings & names etc.
-LayerKinds & LayerPairKinds are best guess & the associated text is user defined.
 
 
  Date        Ver  Comment
@@ -226,9 +231,9 @@ begin
                             MLayerPairKindStr := LayerPairKindToStr(NoMechLayerKind);
                     end;
 
-                    IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair',      Board.LayerName(ML2) );
-                    IniFile.WriteString('MechLayer' + IntToStr(i), 'PairLayer', IntToStr(ML2) );
-                    IniFile.WriteString('MechLayer' + IntToStr(i), 'PairKind',  MLayerPairKindStr );
+                    IniFile.WriteString ('MechLayer' + IntToStr(i), 'Pair',      Board.LayerName(ML2) );
+                    IniFile.WriteInteger('MechLayer' + IntToStr(i), 'PairLayer', ML2 );
+                    IniFile.WriteString ('MechLayer' + IntToStr(i), 'PairKind',  MLayerPairKindStr );
                 end;
             end;
         end;
@@ -251,6 +256,7 @@ var
     MLayerPairKindStr2 : WideString;
     LayerName1         : WideString;
     LayerName2         : WideString;
+    Pair2LID           : integer;
     LColour            : TColor;
     ML1, ML2           : integer;
     i, j               : Integer;
@@ -326,23 +332,27 @@ begin
 
 //    allow turn Off -> ON only, default Off for missing entries
             If Not MechLayer.MechanicalLayerEnabled then
-                MechLayer.MechanicalLayerEnabled := IniFile.ReadBool('MechLayer' + IntToStr(i), 'Enabled', False);
+                MechLayer.MechanicalLayerEnabled := IniFile.ReadBool ('MechLayer' + IntToStr(i), 'Enabled',   False);
 
-            MLayerKindStr                      := IniFile.ReadString('MechLayer' + IntToStr(i), 'Kind',     LayerKindToStr(NoMechLayerKind) );
-            MPairLayer                         := IniFile.ReadString('MechLayer' + IntToStr(i), 'Pair',     '');
-            MLayerPairKindStr                  := IniFile.ReadString('MechLayer' + IntToStr(i), 'PairKind', LayerPairKindToStr(NoMechLayerKind) );
-            MechLayer.LinkToSheet              := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'Sheet',    False);
-            MechLayer.DisplayInSingleLayerMode := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'SLM',      False);
-            MechLayer.IsDisplayed[Board]       := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'Show',     True);
-            LColour                            := IniFile.ReadString('MechLayer' + IntToStr(i), 'Color',    NoColour);
+            MLayerKindStr                      := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Kind',      LayerKindToStr(NoMechLayerKind) );
+            MPairLayer                         := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Pair',      '');
+            Pair2LID                           := IniFile.ReadInteger('MechLayer' + IntToStr(i), 'PairLayer', 0);
+            MLayerPairKindStr                  := IniFile.ReadString ('MechLayer' + IntToStr(i), 'PairKind',  LayerPairKindToStr(NoMechLayerKind) );
+            MechLayer.LinkToSheet              := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'Sheet',     False);
+            MechLayer.DisplayInSingleLayerMode := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'SLM',       False);
+            MechLayer.IsDisplayed[Board]       := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'Show',      True);
+            LColour                            := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Color',     NoColour);
             if LColour <> NoColour then
                 PCBSysOpts.LayerColors(ML1) := StringToColor( LColour);
 
             MLayerKind     := LayerStrToKind(MLayerKindStr);
             MLayerPairKind := LayerStrToPairKind(MLayerPairKindStr);
-//    new "kind" pairs are treated individually by kind but are still a Pair
+//    new "kind" pairs is a separate property & single layers each have a Kind
             if not LegacyMLS then
                 MechLayer.Kind  := MLayerKind;
+
+//   if no key for any Pair then go around.
+            if MPairLayer = '' then continue;
 
 //    ignore already processed layers.
             for j := (i + 1) to MaxMechLayers do
@@ -367,9 +377,9 @@ begin
 //                end;
 
 // does ML2 name (from file) match ML1 paired layer name
-                MechPairIdx        := -1;
+                MechPairIdx := -1;
                 if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML1, ML2) then
-                    MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)
+                    MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)       // index? to what FFS
 
                 if not LegacyMLS then
                 begin
@@ -378,10 +388,10 @@ begin
                     begin
                         MechLayerPair := MechLayerPairs.LayerPair(MechPairIdx);
                         MechLayerPairs.LayerPairKind(MechPairIdx) := MLayerPairKind;
-                    end;
 
-                    if MLayerPairKind <> MLayerPairKind2 then
+                        if MLayerPairKind <> MLayerPairKind2 then
                         ShowMessage('mismatch pair kinds ' + LayerName1 + '---' + LayerName2);
+                    end;
                 end;
 
 // Creating pairs automatically changes the names to Top & Bottom keywords first!
@@ -390,6 +400,7 @@ begin
                 begin
                     MechLayer.Name  := LayerName1;
                     MechLayer2.Name := LayerName2;
+                    break;
                 end;
             end;
         end; // section exists
@@ -541,7 +552,7 @@ function Version(const dummy : boolean) : TStringList;
 begin
     Result               := TStringList.Create;
     Result.Delimiter     := '.';
-    Result.Duplicates    := dupAccept;
+//    Result.Duplicates    := dupAccept;   // requires .Sort
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
@@ -585,7 +596,6 @@ var
     PairKind : TMechanicalLayerPairKind;
 begin
     Result := TStringList.Create;
-    Result.Duplicates := dupIgnore;
     if LegacyMLS then exit;
 
     for i:= 0 to (MLPS.Count - 1) do
