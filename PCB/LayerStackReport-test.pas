@@ -739,6 +739,7 @@ begin
     27              : Result := '3D Body Bottom';
     28              : Result := 'Route Tool Path';   // single
     29              : Result := 'Sheet';             // single
+    30              : Result := 'Board Shape';
     else              Result := 'Unknown'
     end;
 end;
@@ -755,7 +756,7 @@ begin
     Result.Delimiter := '|';
     Result.NameValueSeparator := '=';
 
-    LayerStack := Board.LayerStack_V7;
+//    LayerStack := Board.LayerStack_V7;
 
     for i := 1 to MaxMechLayers do
     begin
