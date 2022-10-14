@@ -20,7 +20,7 @@ BL Miller
 }
 
 const
-    Sectors      = 4;     // 1 to eSections for a full circle
+    Sectors      = 3;     // 1 to eSections for a full circle
     eSections    = 4;     // divided sections of full circle 4 == 90deg
     eOuterRadius = 200;   // mils
     eInnerRadius = 100;   // mils
