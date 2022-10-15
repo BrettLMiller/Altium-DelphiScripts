@@ -1,10 +1,11 @@
 { MakeRegionShapes.pas
   Create Region shapes with polyline regionshape interface.
 
-  PcbLib only
+  PcbLib (PcbDoc partially)
 
 MakeDonuts()
-   annular rings for unplated pads with copper pullback from hole.
+   annular rings for unplated pads (use for copper pullback from hole).
+   Operates on Selected pad or via or selected PcbDoc component's pin 1
 
 ExtrudeRegion()
   supports regionshape and most likely contoured regions.
@@ -12,6 +13,7 @@ ExtrudeRegion()
 BL Miller
 20221013  0.10 POC tricky to get arc segments to behave.
 20221015  0.11 add extruded body fn.
+20221016  0.12 support creating Donut shapes in PcbDoc components
 
 
    RotateCoordsAroundXY (X, Y, Centre.X, Centre.Y, theta);
@@ -41,18 +43,136 @@ function MakeDonutRegion(Centre : TCoordPoint, OutR, InR : extended, Layer : TLa
 
 procedure MakeDonut;
 var
-    SourceLib        : IPCB_Library;
-    Board            : IPCB_Board;
-    Iterator         : IPCB_GroupIterator;
-    NewRegion : IPCB_Region;
-    Centre    : TCoordPoint;
-    BWOrigin     : TCoordPoint;
-    Layer     : TLayer;
-    OutR, InR : extended;
-    CompFP    : IPCB_LibComponent;
-    APad      : IPCB_Pad;
-    APrim     : IPCB_Primitive;
-    I         : integer;
+    SourceLib  : IPCB_Library;
+    Board      : IPCB_Board;
+    Iterator   : IPCB_GroupIterator;
+    NewRegion  : IPCB_Region;
+    Centre     : TCoordPoint;
+    BWOrigin   : TCoordPoint;
+    Layer      : TLayer;
+    OutR, InR  : extended;
+    CompFP     : IPCB_LibComponent;
+    APad       : IPCB_Pad;
+    APrim      : IPCB_Primitive;
+    I          : integer;
+
+begin
+    Document := GetWorkSpace.DM_FocusedDocument;
+    if not ((Document.DM_DocumentKind = cDocKind_PcbLib) or (Document.DM_DocumentKind = cDocKind_Pcb)) Then
+//    if not (Document.DM_DocumentKind = cDocKind_PcbLib) Then
+    begin
+         ShowMessage('No PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Document.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        SourceLib := PCBServer.GetCurrentPCBLibrary;
+        Board := SourceLib.Board;
+        IsLib := true;
+    end else
+        Board  := PCBServer.GetCurrentPCBBoard;
+
+    if (Board = nil) and (SourceLib = nil) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
+
+// if iterating all FP in PcbLib..
+//    if IsLib then
+//    begin
+//        SourceLib.SetState_CurrentComponent(CompFP);    //must use else Origin & BR all wrong.
+//        SourceLib.RefreshView;
+//        Board := SourceLib.Board;
+//    end;
+
+    Layer  := Board.CurrentLayer;
+    OutR   := eOuterRadius;
+    InR    := eInnerRadius;
+    APad   := nil;
+    CompFP := nil;
+
+    for I := 0 to (Board.SelectedObjectsCount - 1) do
+    begin
+// find the PCB Component
+        APrim := Board.SelectecObject(I);
+        if IsLib then
+            CompFP := SourceLib.CurrentComponent
+        else
+        begin
+            if APrim.ObjectId = eComponentObject then
+                CompFP := APrim;
+            if APrim.InComponent then
+                CompFP := APrim.Component;
+        end;
+
+        if CompFP = nil then continue;
+
+// alt. to iterator methods.
+// for I := 1 to CompFP.GetPrimitiveCount(MkSet(ePadObject)) do
+// APad := CompFP.GetPrimitiveAt(I, ePadObject)
+
+//         if APrim.ObjectId = eRegionObject then
+//             Showmessage(IntToStr(APrim.ShapeSegmentCount));
+
+        Iterator := CompFP.GroupIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject));
+
+        APrim := Iterator.FirstPCBObject;
+        While (APrim <> Nil) Do
+        Begin
+            if APrim.Selected then
+            begin
+                APad := APrim;
+                break;
+            end;
+
+            if (not IsLib) then
+            if APrim.ObjectId = ePadObject then
+            if APrim.Name = '1' then
+            begin
+                APad := APrim;
+                break;
+            end;
+
+            APrim := Iterator.NextPCBObject;
+        end;
+        CompFP.GroupIterator_Destroy(Iterator);
+
+    end;
+
+//    Centre   := Point(Board.XOrigin, Board.YOrigin);
+
+    if APad <> nil then
+    begin
+        Centre := Point(APad.X, APad.Y);
+
+        PCBServer.PreProcess;
+        NewRegion := MakeDonutRegion(Centre, OutR, InR, Layer, eRegionKind_Copper);    //  eRegionKind_NamedRegion
+        if NewRegion <> nil then
+            if CompFP <> nil then
+                Board.AddPCBObject(NewRegion);
+
+            if (not IsLib) then
+                CompFP.AddPCBObject(NewRegion);
+
+        PCBServer.PostProcess;
+    end;
+end;
+
+procedure ExtrudeRegion;
+var
+    SourceLib  : IPCB_Library;
+    Board      : IPCB_Board;
+    Iterator   : IPCB_GroupIterator;
+    APrim      : IPCB_Primitive;
+    CompFP     : IPCB_LibComponent;
+    ARegion    : IPCB_Region;
+    NewBody    : IPCB_ComponentBody;
+    Layer      : TLayer;
+    ML         : TLayer;
+    I          : integer;
 
 begin
     Document := GetWorkSpace.DM_FocusedDocument;
@@ -85,95 +205,6 @@ begin
 //        Board := SourceLib.Board;
 //    end;
 
-    CompFP := SourceLib.CurrentComponent;
-    Layer  := Board.CurrentLayer;
-    OutR   := eOuterRadius;
-    InR    := eInnerRadius;
-    APad   := nil;
-
-    for I := 0 to (Board.SelectedObjectsCount - 1) do
-    begin
-
-// alt. to iterator methods.
-// CompFP.GetPrimitiveCount(MkSet(ePadObject))
-// APad := CompFP.GetPrimitiveAt(I, ePadObject)
-
-//         if APrim.ObjectId = eRegionObject then
-//             Showmessage(IntToStr(APrim.ShapeSegmentCount));
-
-        Iterator := CompFP.GroupIterator_Create;
-        Iterator.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject));
-
-        APrim := Iterator.FirstPCBObject;
-        While (APrim <> Nil) Do
-        Begin
-            if APrim.Selected then
-                APad := APrim;
-
-            APrim := Iterator.NextPCBObject;
-        end;
-        CompFP.GroupIterator_Destroy(Iterator);
-
-    end;
-
-//    Centre   := Point(Board.XOrigin, Board.YOrigin);
-
-    if APad <> nil then
-    begin
-        Centre := Point(APad.X, APad.Y);
-
-        PCBServer.PreProcess;
-        NewRegion := MakeDonutRegion(Centre, OutR, InR, Layer, eRegionKind_Copper);    //  eRegionKind_NamedRegion
-        if NewRegion <> nil then
-            Board.AddPCBObject(NewRegion);
-        PCBServer.PostProcess;
-    end;
-end;
-
-procedure ExtrudeRegion;
-var
-    SourceLib        : IPCB_Library;
-    Board            : IPCB_Board;
-    Iterator         : IPCB_GroupIterator;
-    APrim     : IPCB_Primitive;
-    CompFP    : IPCB_LibComponent;
-    ARegion   : IPCB_Region;
-    NewBody   : IPCB_ComponentBody;
-    Layer     : TLayer;
-    ML        : TLayer;
-    I         : integer;
-
-begin
-    Document := GetWorkSpace.DM_FocusedDocument;
-//    if not ((Document.DM_DocumentKind = cDocKind_PcbLib) or (Document.DM_DocumentKind = cDocKind_Pcb)) Then
-    if not (Document.DM_DocumentKind = cDocKind_PcbLib) Then
-    begin
-         ShowMessage('No PcbLib selected. ');
-         Exit;
-    end;
-    IsLib  := false;
-    if (Document.DM_DocumentKind = cDocKind_PcbLib) then
-    begin
-        SourceLib := PCBServer.GetCurrentPCBLibrary;
-        Board := SourceLib.Board;
-        IsLib := true;
-    end else
-        Board  := PCBServer.GetCurrentPCBBoard;
-
-    if (Board = nil) and (SourceLib = nil) then
-    begin
-        ShowError('Failed to find PcbDoc or PcbLib.. ');
-        exit;
-    end;
-
-// if iterating all FP in PcbLib..
-//    if IsLib then 
-//    begin
-//        SourceLib.SetState_CurrentComponent(CompFP);    //must use else Origin & BR all wrong.
-//        SourceLib.RefreshView;
-//        Board := SourceLib.Board;
-//    end;
-
     CompFP  := SourceLib.CurrentComponent;
     Layer   := Board.CurrentLayer;
     ARegion := nil;
@@ -195,8 +226,10 @@ begin
 //             Showmessage(IntToStr(APrim.ShapeSegmentCount));
 
             if APrim.Selected then
+            begin
                 ARegion := APrim;
-
+                break;
+            end;
             APrim := Iterator.NextPCBObject;
         end;
         CompFP.GroupIterator_Destroy(Iterator);
@@ -215,7 +248,12 @@ begin
 
         if NewBody <> nil then
         begin
-            Board.AddPCBObject(NewBody);
+            if CompFP <> nil then
+                Board.AddPCBObject(NewBody);
+
+            if (not IsLib) then
+                CompFP.AddPCBObject(NewBody);
+
             NewBody.GraphicallyInvalidate;
         end;
         PCBServer.PostProcess;
@@ -443,4 +481,3 @@ begin
         end;
     end;
 end;
-
