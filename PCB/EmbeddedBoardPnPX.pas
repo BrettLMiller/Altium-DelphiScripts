@@ -5,7 +5,7 @@
   add outlines & region shape from child brd shapes
   add keepouts to EMB board from child brds
   generate a full Placement file with EMB & row & column indexes.
-  
+  support defined RouteToolPath layer per child board tho all should match, may change with layerkinds etc!
 
   Author BL Miller
 20220503  0.1  POC adapted from EmbeddedObjects.pas.
@@ -16,9 +16,11 @@
 20220421  0.15 add Placement file report with EMB & row & column indices
 20220606  0.16 region location error if board shape was convex: use bounding box calc. move.
 20220701  0.17 separate text from regionshape fn & layer.
+20221028  0.18 use RouteToolpath & MechLayerKind
+
 
 Child board-outline bounding rect is used to align to EMB origin
-AD17 Outjob placement file for any mirrored EMB is wrong.
+AD17 Outjob placement file for any mirrored EMB is wrong!
 
 }
 const
@@ -26,8 +28,9 @@ const
    cOutlineLayer  = 21;    // destination outlines
    cRegShapeLayer = 23;    // destination region shapes
    cTextLayer     = 22;    // destination text labels
-// make keepouts
-   cRouteNPLayer  = 11;    // source NTP routing profile
+// make keepouts source layer
+   cMLKRouteToolPath = 28;    // for old vers that do not have builtin const for layerkind 'Route Tool Path'
+   cRouteNPLayer     = 11;    // fall-back source NTP routing profile if no Kind found
 
    cTextHeight = 5;
    cTextWidth  = 0.5;
@@ -38,89 +41,38 @@ const
    cBrdCutouts  = 'M11=AT';
    cPolyCutouts = 'M11=AT';
 
-var
-    Board     : IPCB_Board;
-    Borigin   : TPoint;
-    BUnits    : TUnit;
-    Report    : TStringList;
-    FileName  : WideString;
-//    LayerSet  : IPCB_LayerSet;
+// version
+    AD19VersionMajor  = 19;
+    AD17MaxMechLayers = 32;       // scripting API has broken consts from TV6_Layer; 256 layers possible?
+    AD19MaxMechLayers = 1024;
 
-function DrawBox(var EMB : IPCB_EmbeddedBoard, const Layer : TLayer, const UIndex : integer, const Tag : WideString) : boolean;    forward;
-function DrawOutlines(var EMB : IPCB_EmbeddedBoard, const Layer : TLayer, UIndex : integer, EIndex : integer) : TCoordRect;        forward;
-function DrawBORegions(var EMB : IPCB_EmbeddedBoard, Layer : TLayer, RegKind : TRegionKind, const UIndex : integer) : TObjectList; forward;
-function ReportOnEmbeddedBoard (var EMB : IPCB_EmbeddedBoard, Var RowCnt : integer, Var ColCnt : integer) : boolean;               forward;
-function AddText(NewText : WideString; Location : TLocation, Layer : TLayer, UIndex : integer) : IPCB_Text;                        forward;
-function AddKeepouts(var EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;        forward;
-function SetPrimsAsKeepouts(PL : TObjectList, const Layer : TLayer) : boolean;                                                     forward;
+
+var
+    Board         : IPCB_Board;
+    Borigin       : TPoint;
+    BUnits        : TUnit;
+    Report        : TStringList;
+    FileName      : WideString;
+    VerMajor      : WideString;
+    MaxMechLayers : integer;
+    LegacyMLS     : boolean;
+
+function DrawBox(EMB : IPCB_EmbeddedBoard, const Layer : TLayer, const UIndex : integer, const Tag : WideString) : boolean;    forward;
+function DrawOutlines(EMB : IPCB_EmbeddedBoard, const Layer : TLayer, UIndex : integer, EIndex : integer) : TCoordRect;        forward;
+function DrawBORegions(EMB : IPCB_EmbeddedBoard, Layer : TLayer, RegKind : TRegionKind, const UIndex : integer) : TObjectList; forward;
+function ReportOnEmbeddedBoard (EMB : IPCB_EmbeddedBoard, Var RowCnt : integer, Var ColCnt : integer) : boolean;               forward;
+function AddText(NewText : WideString; Location : TLocation, Layer : TLayer, UIndex : integer) : IPCB_Text;                    forward;
+function AddKeepouts(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;        forward;
+function SetPrimsAsKeepouts(PL : TObjectList, const Layer : TLayer) : boolean;                                                 forward;
 function MakeRegionFromPolySegList (PLBO : IPCB_BoardOutline, const Layer : TLayer, const RegKind : TRegionKind, Add : boolean) : IPCB_Region; forward;
-function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;  forward;
+function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;                 forward;
+function GetChildBoardObjs(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet ) : TObjectList; forward;
+function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;             forward;
+function RestoreEmbeddedBoard (EMB : IPCB_EmbeddedBoard, RowCnt : integer, ColCnt : integer) : boolean;       forward;
+function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;                   forward;
+function Version(const dummy : boolean) : TStringList;                           forward;
+function GetMechLayer(ABoard : IPCB_Board, MLK : TMechanicalLayerKind) : TLayer; forward;
 
-function CollapseEmbeddedBoard (var EMB : IPCB_EmbeddedBoard) : boolean;
-begin
-    EMB.Setstate_RowCount(1);
-    EMB.Setstate_ColCount(1);
-    EMB.GraphicallyInvalidate;
-end;
-
-function RestoreEmbeddedBoard (var EMB : IPCB_EmbeddedBoard, RowCnt : integer, ColCnt : integer) : boolean;
-begin
-    EMB.Setstate_RowCount(RowCnt);
-    EMB.Setstate_ColCount(ColCnt);
-    EMB.GraphicallyInvalidate;
-end;
-
-function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;
-Var
-    EmbedObj   : IPCB_EmbeddedBoard;
-    BIterator  : IPCB_BoardIterator;
-    BLayerSet  : IPCB_LayerSet;
-    Primitive  : IPCB_Primitive;
-
-begin
-    Result := TObjectList.Create;
-    Result.OwnsObjects := false;      // critical!
-
-    BLayerSet := LayerSetUtils.CreateLayerSet.IncludeAllLayers;
-    BIterator := ABoard.BoardIterator_Create;
-    BIterator.AddFilter_ObjectSet(MkSet(eEmbeddedBoardObject));
-    BIterator.AddFilter_IPCB_LayerSet(BLayerSet);
-    BIterator.AddFilter_Method(eProcessAll);
-
-    EmbedObj := BIterator.FirstPCBObject;
-    while (EmbedObj <> Nil) do
-    begin
-        Result.Add(EmbedObj);
-        EmbedObj := BIterator.NextPCBObject;
-    end;
-    ABoard.BoardIterator_Destroy(BIterator);
-end;
-
-function GetChildBoardObjs(var EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet ) : TObjectList;
-var
-    CBoard    : IPCB_Board;
-    BIterator : IPCB_BoardIterator;
-    Prim      : IPCB_Primitive;
-
-begin
-    Result := TObjectList.Create;
-    Result.OwnsObjects := false;
-
-    CBoard := EMB.ChildBoard;
-
-    BIterator := CBoard.BoardIterator_Create;
-    BIterator.AddFilter_ObjectSet(ObjSet);
-    BIterator.AddFilter_IPCB_LayerSet(LayerSet);
-    BIterator.AddFilter_Method(eProcessAll);
-
-    Prim := BIterator.FirstPCBObject;
-    while (Prim <> Nil) do
-    begin
-        Result.Add(Prim);
-        Prim := BIterator.NextPCBObject;
-    end;
-    CBoard.BoardIterator_Destroy(BIterator);
-end;
 
 procedure ReportEmbeddedBoardObjs;
 var
@@ -191,7 +143,7 @@ begin
     Report.Free;
 end;
 
-function GetEmbeddedBoardComps(EMBI : integer; var EMB : IPCB_EmbeddedBoard) : boolean;
+function GetEmbeddedBoardComps(EMBI : integer; EMB : IPCB_EmbeddedBoard) : boolean;
 var
     CB        : IPCB_Board;
     PLBO      : IPCB_BoardOutline;
@@ -359,11 +311,12 @@ procedure AddKeepOutsToEmbdBrdObjs;
 var
     EmbeddedBoardList : TObjectList;
     EMB               : IPCB_EmbeddedBoard;
+    CB                : IPCB_Board;
     KORegList         : TObjectList;
     RegKind           : TRegionKind;
     KOText            : TStringList;
     KOList            : TObjectList;
-    Layer             : ILayer;
+    Layer             : TLayer;
     OSet              : TObjectSet;
     Layers            : IPCB_LayerSet;
     I                 : integer;
@@ -382,22 +335,39 @@ begin
     if (BUnits = eImperial) then BUnits := eMetric
     else BUnits := eImperial;
 
+    VerMajor := Version(true).Strings(0);
+
+    MaxMechLayers := AD17MaxMechLayers;
+    LegacyMLS     := true;
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    begin
+        LegacyMLS     := false;
+        MaxMechLayers := AD19MaxMechLayers;
+    end;
+
     Report := TStringList.Create;
 
-    Layer  := LayerUtils.MechanicalLayer(cRouteNPLayer);
-    Layers := LayerSetUtils.EmptySet;
-    Layers.Include(Layer);
-    OSet   := MkSet(eTrackObject, eArcObject);
-
     EmbeddedBoardList := GetEmbeddedBoards(Board);
-    Layer   := eKeepOutLayer;
-    RegKind := eRegionKind_Copper;
 
     for I := 0 to (EmbeddedBoardList.Count - 1) do
     begin
         EMB := EmbeddedBoardList.Items(I);
+        CB  := EMB.ChildBoard;
+
+        Layer := CB.RouteToolPathLayer;
+        if Layer = 0 then
+            Layer := GetMechLayer(CB, cMLKRouteToolPath);
+        if Layer = 0 then
+            Layer := LayerUtils.MechanicalLayer(cRouteNPLayer);
+
+        Layers := LayerSetUtils.EmptySet;
+        Layers.Include(Layer);
+        OSet   := MkSet(eTrackObject, eArcObject);
+
         KOList := GetChildBoardObjs(EMB, OSet, Layers);
 
+        Layer   := eKeepOutLayer;
+        RegKind := eRegionKind_Copper;
         AddKeepOuts(EMB, KOList, Layer, 0);
         KORegList := DrawBORegions(EMB, Layer, RegKind, 0);
         SetPrimsAsKeepouts(KORegList, Layer);
@@ -624,7 +594,7 @@ begin
     end;
 end;
 
-function AddKeepouts(var EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;
+function AddKeepouts(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;
 var
     CB        : IPCB_Board;
     PLBO      : IPCB_BoardOutline;
@@ -680,7 +650,7 @@ begin
     PCBServer.PostProcess;
 end;
 
-function DrawOutlines(var EMB : IPCB_EmbeddedBoard, Layer : TLayer, UIndex : integer, EIndex : integer) : boolean;
+function DrawOutlines(EMB : IPCB_EmbeddedBoard, Layer : TLayer, UIndex : integer, EIndex : integer) : boolean;
 var
     CB       : IPCB_Board;
     PLBO     : IPCB_BoardOutline;
@@ -745,7 +715,7 @@ begin
     PCBServer.PostProcess;
 end;
 
-function DrawBORegions(var EMB : IPCB_EmbeddedBoard, Layer : TLayer, RegKind : TRegionKind, const UIndex : integer) : TObjectList;
+function DrawBORegions(EMB : IPCB_EmbeddedBoard, Layer : TLayer, RegKind : TRegionKind, const UIndex : integer) : TObjectList;
 var
     CB       : IPCB_Board;
     BSRegion : IPCB_Region;
@@ -821,7 +791,7 @@ begin
     PCBServer.PostProcess;
 end;
 {..............................................................................}
-function DrawBox(var EMB : IPCB_EmbeddedBoard, const Layer : TLayer, const UIndex : integer, const Tag : WideString) : boolean;
+function DrawBox(EMB : IPCB_EmbeddedBoard, const Layer : TLayer, const UIndex : integer, const Tag : WideString) : boolean;
 var
     BR       : TCoordRect;
     Track    : IPCB_Track;
@@ -1028,7 +998,7 @@ begin
     PCBServer.PostProcess;
 end;
 {..............................................................................}
-function ReportOnEmbeddedBoard (var EMB : IPCB_EmbeddedBoard, Var RowCnt : integer, Var ColCnt : integer) : boolean;
+function ReportOnEmbeddedBoard (EMB : IPCB_EmbeddedBoard, Var RowCnt : integer, Var ColCnt : integer) : boolean;
 var
     BR : TCoordRect;
     EB : IPCB_Board;
@@ -1093,4 +1063,97 @@ begin
     Result.X2 := Max(TBR.X2, SBR.X2);
     Result.Y1 := Min(TBR.Y1, SBR.Y1);
     Result.Y2 := Max(TBR.Y2, SBR.Y2);
+end;
+
+function GetChildBoardObjs(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet ) : TObjectList;
+var
+    CBoard    : IPCB_Board;
+    BIterator : IPCB_BoardIterator;
+    Prim      : IPCB_Primitive;
+
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
+
+    CBoard := EMB.ChildBoard;
+
+    BIterator := CBoard.BoardIterator_Create;
+    BIterator.AddFilter_ObjectSet(ObjSet);
+    BIterator.AddFilter_IPCB_LayerSet(LayerSet);
+    BIterator.AddFilter_Method(eProcessAll);
+
+    Prim := BIterator.FirstPCBObject;
+    while (Prim <> Nil) do
+    begin
+        Result.Add(Prim);
+        Prim := BIterator.NextPCBObject;
+    end;
+    CBoard.BoardIterator_Destroy(BIterator);
+end;
+
+function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;
+begin
+    EMB.Setstate_RowCount(1);
+    EMB.Setstate_ColCount(1);
+    EMB.GraphicallyInvalidate;
+end;
+
+function RestoreEmbeddedBoard (EMB : IPCB_EmbeddedBoard, RowCnt : integer, ColCnt : integer) : boolean;
+begin
+    EMB.Setstate_RowCount(RowCnt);
+    EMB.Setstate_ColCount(ColCnt);
+    EMB.GraphicallyInvalidate;
+end;
+
+function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;
+Var
+    EmbedObj   : IPCB_EmbeddedBoard;
+    BIterator  : IPCB_BoardIterator;
+    BLayerSet  : IPCB_LayerSet;
+    Primitive  : IPCB_Primitive;
+
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;      // critical!
+
+    BLayerSet := LayerSetUtils.CreateLayerSet.IncludeAllLayers;
+    BIterator := ABoard.BoardIterator_Create;
+    BIterator.AddFilter_ObjectSet(MkSet(eEmbeddedBoardObject));
+    BIterator.AddFilter_IPCB_LayerSet(BLayerSet);
+    BIterator.AddFilter_Method(eProcessAll);
+
+    EmbedObj := BIterator.FirstPCBObject;
+    while (EmbedObj <> Nil) do
+    begin
+        Result.Add(EmbedObj);
+        EmbedObj := BIterator.NextPCBObject;
+    end;
+    ABoard.BoardIterator_Destroy(BIterator);
+end;
+
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result               := TStringList.Create;
+    Result.Delimiter     := '.';
+    Result.DelimitedText := Client.GetProductVersion;
+end;
+
+function GetMechLayer(CB : IPCB_Board, MLK : TMechanicalLayerKind) : TLayer;
+var
+    LayerStack    : IPCB_LayerStack_V7;
+    MechLayer     : IPCB_MechanicalLayer;
+    i, ML1        : integer;
+
+begin
+    Result := 0;
+    LayerStack := CB.LayerStack_V7;
+
+    if not LegacyMLS then
+    for i := 1 To MaxMechLayers do
+    begin
+        ML1 := LayerUtils.MechanicalLayer(i);
+        MechLayer := LayerStack.LayerObject_V7[ML1];
+        if MechLayer.Kind = MLK then
+            Result := ML1;
+    end;
 end;
