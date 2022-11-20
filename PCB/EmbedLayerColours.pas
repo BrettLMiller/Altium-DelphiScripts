@@ -1,6 +1,6 @@
-{ EmbedBoardColour.pas
+{ EmbedLayerColours.pas
 
-store (& restore) PCB layer colours in/from the PcbDoc file.
+store (& restore) PCB Board layer colours in/from the PcbDoc file.
 
 Author BL Miller
 20221120 : 0.1 POC Embed colours as text in EmbedObj.
