@@ -161,7 +161,7 @@ begin
 
     Project := GetWorkSpace.DM_FocusedProject;
     FilePath := ExtractFilePath(Project.DM_ProjectFullPath);
-    if (Project.DM_ProjectFullPath = 'FreeDocuments') or (FilePath = '') then
+    if (Project.DM_ProjectFullPath = 'Free Documents') or (FilePath = '') then
         FilePath :=  SpecialFolder_AllUserDocuments;   // GetCurrentDir;
 
     FilePath := FilePath + '\AD_Installs_Report.Txt';
