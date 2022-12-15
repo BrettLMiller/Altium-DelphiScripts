@@ -1,6 +1,6 @@
 { libADOQuery.pas
 
-    see ADOsnippets.pas
+Author BL Miller
 
 29/09/2020  0.10 rework as shared libADOQuery
 05/10/2020  0.12 Just use variable to hold last Databasefile as connection string is changed (made useless) by provider / something..
@@ -12,12 +12,16 @@
 30/10/2020  0.18 Warn about Mode=Read with UPDATE SQL.
 15/12/2022  0.19 Add dblib file exists sanity check
 
-Author BL Miller
+Unit self test:
+- tries to write report files to c:\temp\ folder.
+- Four constants must be preset to match your DBLib config.
+
+Write access not resolved with Access64 ??
 
 Historical Connection Strings
-  Altium H Provider=MICROSOFT.JET.OLEDB.4.0;Data Source=P:\DB-Libraries\test.mdb;Persist Security Info=False
-  Altium W Provider=MICROSOFT.JET.OLEDB.4.0;Data Source=C:\Altium Projects\TestingStuff\dB-Libraries\Inductor.MDB;Persist Security Info=False
-  Excel  W Provider=Microsoft.ACE.OLEDB.12.0;User ID=Admin;Data Source=C:\Altium Projects\TestingStuff\dB-Libraries\Inductor.MDB;Mode=Share Deny Write;Extended Properties="";Jet OLEDB:System database="";Jet
+-  Altium H Provider=MICROSOFT.JET.OLEDB.4.0;Data Source=P:\DB-Libraries\test.mdb;Persist Security Info=False
+-  Altium W Provider=MICROSOFT.JET.OLEDB.4.0;Data Source=C:\Altium Projects\TestingStuff\dB-Libraries\Inductor.MDB;Persist Security Info=False
+-  Excel  W Provider=Microsoft.ACE.OLEDB.12.0;User ID=Admin;Data Source=C:\Altium Projects\TestingStuff\dB-Libraries\Inductor.MDB;Mode=Share Deny Write;Extended Properties="";Jet OLEDB:System database="";Jet
 
 Note:
  There is a connection string related to Altium's DBLib open in the GUI
