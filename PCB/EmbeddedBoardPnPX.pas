@@ -17,6 +17,7 @@
 20220606  0.16 region location error if board shape was convex: use bounding box calc. move.
 20220701  0.17 separate text from regionshape fn & layer.
 20221028  0.18 use RouteToolpath & MechLayerKind
+20221217  0.19 later AD 21-22 does not like to pass IPCB_ChildBoard object.
 
 
 Child board-outline bounding rect is used to align to EMB origin
@@ -65,13 +66,13 @@ function AddText(NewText : WideString; Location : TLocation, Layer : TLayer, UIn
 function AddKeepouts(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;        forward;
 function SetPrimsAsKeepouts(PL : TObjectList, const Layer : TLayer) : boolean;                                                 forward;
 function MakeRegionFromPolySegList (PLBO : IPCB_BoardOutline, const Layer : TLayer, const RegKind : TRegionKind, Add : boolean) : IPCB_Region; forward;
-function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;                 forward;
+function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;                      forward;
 function GetChildBoardObjs(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet ) : TObjectList; forward;
-function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;             forward;
+function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;                  forward;
 function RestoreEmbeddedBoard (EMB : IPCB_EmbeddedBoard, RowCnt : integer, ColCnt : integer) : boolean;       forward;
-function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;                   forward;
-function Version(const dummy : boolean) : TStringList;                           forward;
-function GetMechLayer(ABoard : IPCB_Board, MLK : TMechanicalLayerKind) : TLayer; forward;
+function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;                        forward;
+function Version(const dummy : boolean) : TStringList;                                forward;
+function GetMechLayer(EMB : IPCB_EmbeddedBoard, MLK : TMechanicalLayerKind) : TLayer; forward;
 
 
 procedure ReportEmbeddedBoardObjs;
@@ -353,10 +354,10 @@ begin
     begin
         EMB := EmbeddedBoardList.Items(I);
         CB  := EMB.ChildBoard;
-
         Layer := CB.RouteToolPathLayer;
+
         if Layer = 0 then
-            Layer := GetMechLayer(CB, cMLKRouteToolPath);
+            Layer := GetMechLayer(EMB, cMLKRouteToolPath);
         if Layer = 0 then
             Layer := LayerUtils.MechanicalLayer(cRouteNPLayer);
 
@@ -1138,14 +1139,16 @@ begin
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
-function GetMechLayer(CB : IPCB_Board, MLK : TMechanicalLayerKind) : TLayer;
+function GetMechLayer(EMB : IPCB_EmbeddedBoard, MLK : TMechanicalLayerKind) : TLayer;
 var
+    CB            : IPCB_Board;
     LayerStack    : IPCB_LayerStack_V7;
     MechLayer     : IPCB_MechanicalLayer;
     i, ML1        : integer;
 
 begin
     Result := 0;
+    CB  := EMB.ChildBoard;
     LayerStack := CB.LayerStack_V7;
 
     if not LegacyMLS then
