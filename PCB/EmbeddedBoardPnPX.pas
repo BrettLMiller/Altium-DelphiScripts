@@ -17,7 +17,7 @@
 20220606  0.16 region location error if board shape was convex: use bounding box calc. move.
 20220701  0.17 separate text from regionshape fn & layer.
 20221028  0.18 use RouteToolpath & MechLayerKind
-20221217  0.19 later AD 21-22 does not like to pass IPCB_ChildBoard object.
+20221217  0.19 later AD 21-22 does not like to pass EMB.ChildBoard object.
 
 
 Child board-outline bounding rect is used to align to EMB origin
