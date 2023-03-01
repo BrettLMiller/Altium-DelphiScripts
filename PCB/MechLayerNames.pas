@@ -45,6 +45,7 @@ Notes:
  22/08/2022 1.44 Export: Board-LayerColor() colours are stale/wrong*1, use PCB SystemOption. Add 'Board Shape' const.
                  Import: Altium rearranges layer names when creating a pair; Force our layer names
  23/08/2022 1.45 try simplify process flow for import. Add LayerID to export & best guess for PairKinds.
+ 01/03/2023 1.46 add missing/new layerkinds
 
 
   TMechanicalLayerToKindItem
@@ -52,6 +53,11 @@ Notes:
 //UnPairCurrentMechLayer()
 Process : RunScriptText
 Text=Var B;C;I;P;M; begin B:=PCBServer.GetCurrentPCBBoard;P:=B.MechanicalPairs;C:=B.CurrentLayer;for I:=1 To 1024 do begin M:=LayerUtils.MechanicalLayer(I);if P.PairDefined(C, M) then begin P.RemovePair(C, M);ShowInfo('UnPaired Mech Layers :' + Layer2String(C) + ' & ' + Layer2String(M));break;end; end;B.ViewManager_UpdateLayerTabs;end;
+
+
+Board.LayerColor(ML1) TV6_layer only, Read only
+
+
 ..................................................................................}
 
 const
@@ -199,7 +205,6 @@ begin
                 MLayerKind := MechLayer.Kind;
             MLayerKindStr := LayerKindToStr(MLayerKind);
 
-// Board.LayerColor[ML1] are wrong or stale.
             sColour := ColorToString( PCBSysOpts.LayerColors(ML1) );
 
             IniFile.WriteString('MechLayer' + IntToStr(i), 'Name',    Board.LayerName(ML1) );       // MechLayer.Name);
@@ -343,7 +348,11 @@ begin
             MechLayer.IsDisplayed[Board]       := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'Show',      True);
             LColour                            := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Color',     NoColour);
             if LColour <> NoColour then
+            begin
                 PCBSysOpts.LayerColors(ML1) := StringToColor( LColour);
+//                if Board.LayerColor(ML1) <> StringToColor(LColour) then
+//                    showmessage('mismatch');
+            end;
 
             MLayerKind     := LayerStrToKind(MLayerKindStr);
             MLayerPairKind := LayerStrToPairKind(MLayerPairKindStr);
@@ -476,6 +485,11 @@ begin
     9               : Result := 'Gold Plating';
     10              : Result := 'Value';
     11              : Result := '3D Body';
+
+// Via IPC-4761
+    15              : Result := 'Tenting';
+    16              : Result := 'Covering';
+    17              : Result := 'Plugging';
     else              Result := 'Unknown'
     end;
 end;
@@ -485,7 +499,7 @@ var
     I : integer;
 begin
     Result := -1;
-    for I := 0 to 12 do
+    for I := 0 to 18 do
     begin
          if LayerPairKindToStr(I) = LPKS then
          begin
@@ -529,6 +543,15 @@ begin
     28              : Result := 'Route Tool Path';   // single
     29              : Result := 'Sheet';             // single
     30              : Result := 'Board Shape';
+// Via IPC-4761
+    37              : Result := 'Tenting Top';
+    38              : Result := 'Tenting Bottom';
+    39              : Result := 'Covering Top';
+    40              : Result := 'Covering Bottom';
+    41              : Result := 'Plugging Top';
+    42              : Result := 'Plugging Bottom';
+    43              : Result := 'Filling';
+    44              : Result := 'Capping';
     else              Result := 'Unknown'
     end;
 end;
@@ -538,7 +561,7 @@ var
     I : integer;
 begin
     Result := -1;
-    for I := 0 to 31 do
+    for I := 0 to 45 do
     begin
          if LayerKindToStr(I) = LKS then
          begin
