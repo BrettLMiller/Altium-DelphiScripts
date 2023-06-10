@@ -1,6 +1,7 @@
 object PanPCBForm: TPanPCBForm
   Left = 0
   Top = 0
+  Hint = 'v0.11'
   Caption = 'Parallel Pan PCBs'
   ClientHeight = 213
   ClientWidth = 312
@@ -11,6 +12,7 @@ object PanPCBForm: TPanPCBForm
   Font.Name = 'Tahoma'
   Font.Style = []
   OldCreateOrder = False
+  ShowHint = False
   OnClose = PanPCBFormClose
   OnMouseEnter = PanPCBFormMouseEnter
   OnMouseLeave = PanPCBFormMouseLeave

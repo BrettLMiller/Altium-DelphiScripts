@@ -1,6 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
+ 20230611   0.11 
 }
 Interface    // this is ignored in delphiscript.
 type
@@ -34,13 +35,13 @@ var
     VR : TcoordRect;
     VC : TcoordPoint;
 begin
-    VR := nil;
+    VR := nil; VC := nil;
     If not FocusedPCB(1) then exit;
 
-    VR := GetViewRect(1);
-    if VR <> nil then
+    VC := GetViewCentre(1);
+    if VC <> nil then
     begin
-        sEntry := 'L' + CoordUnitToString(VR.X1, eMM) + '  R ' + CoordUnitToString(VR.X2, eMM);
+        sEntry := 'X' + CoordUnitToString(VC.X, eMM) + '  Y ' + CoordUnitToString(VC.Y, eMM);
         PanPCBForm.editboxSelectRow.Text  := sEntry;
         PanPCBForm.editboxCurrentPcbDoc.Text := CurrentPCB.FileName;
     end;
