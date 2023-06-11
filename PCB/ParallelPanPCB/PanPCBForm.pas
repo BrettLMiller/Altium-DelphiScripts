@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230611   0.11 
+ 20230611   0.20 
 }
 Interface    // this is ignored in delphiscript.
 type

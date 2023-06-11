@@ -72,8 +72,35 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=
 
+[Parameter1]
+Name=VersionForm
+Value=0.11
+
+[Parameter2]
+Name=VersionCode
+Value=0.20
+
+[Parameter3]
+Name=RevisionDate
+Value=2023-06-11
+
+[Parameter4]
+Name=OriginalDate
+Value=2023-06-10
+
+[Parameter5]
+Name=DocumentTitle
+Value=ParallelPanPCB
+
+[Parameter6]
+Name=Author
+Value=BL Miller
+
 [Generic_Watches]
 0=Return
+
+[Generic_ScriptingSystem]
+StartProcName=PanPCB.pas>PanPCBs
 
 [OutputGroup1]
 Name=Netlist Outputs
