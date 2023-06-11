@@ -6,14 +6,18 @@ Any Pcbdoc can be used to move all others.
 Set to 1sec refresh.
 Click or mouse over the form to start.
 
+Displays matching (to current layer) non-mech layers
+Enables and displays (ditto) matching mech layers.
+Mechanical layers are ONLY matched by layer number not LayerKinds.
+
 Author BL Miller
 
 202306010  0.10 POC
 20230611   0.11 fix tiny mem leak, form to show cursor not BR, failed attempt set current layer.
 20230611   0.20 eliminate use WorkSpace & Projects to allow ServDoc.Focus etc
+20230611   0.21 match undisplayed layers in other Pcbdocs as they are selected.
 
 tbd:
-mirror visible layers       ; seems not to work
 set same current layer      ; seems not to work with scope & is TV7_layer.
 cross highlight CMP with same designator
 
@@ -81,36 +85,34 @@ end;
 
 function PanOtherPCBDocs(dummy : integer) : boolean;
 var
-    DocFPath : WideString;
-    ServDoc  : IServerDocument;
-    CIndex   : integer;
-    OBrd     : IPCB_Board;
-    OBO      : TCoordPoint;
-    VR       : TcoordRect;
-    BrdList  : TStringlist;
-    I        : integer;
-    CLayer   : TLayer;
-    OLayer   : TLayer;
-
-    BLSM     : IPCB_BoardLayerSetManager;
-    LSet     : IPCB_LayerSet;
-    CLSName  : WideString;
-    CLSIndex : integer;
-    CVM      : TPCBViewMode;
-    CLO      : IPCB_LayerObject;
-    CLName   : WideString;
+    LayerStack : IPCB_LayerStack_V7;
+    ServDoc    : IServerDocument;
+    OBrd       : IPCB_Board;
+    MechLayer  : IPCB_MechanicalLayer;
+    VLSet      : IPCB_LayerSet;
+    OBO        : TCoordPoint;
+    VR         : TcoordRect;
+    DocFPath   : WideString;
+    CIndex     : integer;
+    BrdList    : TStringlist;
+    I          : integer;
+    CLayer     : TLayer;
+    OLayer     : TLayer;
+//    CLO      : IPCB_LayerObject;
+    CLName     : WideString;
+    IsMLayer   : boolean;
 begin
     Result := false;
 
-    CLayer := CurrentPCB.GetState_CurrentLayer;
-    CLName := CurrentPCB.LayerName(CLayer);
-    CVM    := CurrentPCB.GetState_MainGraphicalView.GetState_ViewMode;
-//    BLSM := CurrentPCB.BoardLayerSetManager;
-//    CLSIndex := BLSM.CurrentLayersetName;       // does not exist!
-//    BLSet := BLSM.BoardLayerSetByIndex(CLSIndex);
-//    CLSName := BLSM.BoardLayerSetByName(CurrentLSName);
-//    BLSM.MakeCurrent(CLSIndex);
-//                CLO.IsDisplayed[OBrd] := true;
+    CLayer   := CurrentPCB.GetState_CurrentLayer;
+    IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
+
+//    CLName   := CurrentPCB.LayerName(CLayer);
+//    VLSet    := CurrentPCB.VisibleLayers;
+//    OBrd.VisibleLayers.Union(VLSet);
+//    CLO.IsDisplayed(OBrd) := true;   // IPCB_LayerObject interface
+//    CVM    := CurrentPCB.GetState_MainGraphicalView.GetState_ViewMode;
+//    OBrd.GetState_MainGraphicalView.SetState_ViewMode(CVM);
 
     VR := GetViewRect(1);
     BrdList := AllPcbDocs(1);
@@ -118,29 +120,39 @@ begin
     for I := 0 to (BrdList.Count -1 ) do
     begin
         DocFPath := BrdList.Strings(I);
-        ServDoc := BrdList.Objects(I);
-        OBrd := PCBServer.GetPCBBoardByPath(DocFPath);
+        ServDoc  := BrdList.Objects(I);
+        OBrd     := PCBServer.GetPCBBoardByPath(DocFPath);
 // check if not open in PcbServer & ignore.
 // should be redundant when using ServerDocument.
         if OBrd = nil then continue;
 
         If (OBrd.BoardID <> CurrentPCB.BoardID) then
         begin
-              ServDoc.Focus;
+            ServDoc.Focus;
 
-// this just does not work.
-//            OBrd.ViewManager_UpdateLayerTabs;
-//            OBrd.GetState_MainGraphicalView.SetState_ViewMode(CVM);
+            if not IsMLayer then
+            if not OBrd.VisibleLayers.Contains(CLayer) then
+            begin
+                OBrd.VisibleLayers.Include(CLayer);
+                OBrd.LayerIsDisplayed(CLayer) := true;
+                OBrd.ViewManager_UpdateLayerTabs;
+            end;
+
+            if IsMLayer then
+            begin
+                LayerStack := OBrd.LayerStack_V7;
+                MechLayer := LayerStack.LayerObject_V7[CLayer];
+                MechLayer.MechanicalLayerEnabled := true;
+                MechLayer.IsDisplayed(OBrd)      := true;
+//                MechLayer.DisplayInSingleLayerMode :=;
+                OBrd.ViewManager_UpdateLayerTabs;
+            end;
 
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
             begin
 // this section never executes!!
-                if (not OBrd.VisibleLayers.Contains(CLayer)) then
-                    LSet := OBrd.VisibleLayers.Include(CLayer);
-
-                OBrd.LayerIsDisplayed(CLayer) := true;
-                OBrd.CurrentLayerV6 := CurrentPCB.GetState_CurrentLayerV6;
+//                OBrd.CurrentLayerV6 := CurrentPCB.GetState_CurrentLayerV6;
                 OBrd.CurrentLayer := CLayer;
 //                Client.SendMessage('PCB:SetCurrentLayer', 'Layer=' + IntToStr(CLayer) , 255, Client.CurrentView);
                 OBrd.ViewManager_UpdateLayerTabs;
