@@ -1,7 +1,7 @@
 object PanPCBForm: TPanPCBForm
   Left = 0
   Top = 0
-  Hint = 'v0.11'
+  Hint = 'v0.20'
   Caption = 'Parallel Pan PCBs'
   ClientHeight = 213
   ClientWidth = 312
@@ -44,6 +44,15 @@ object PanPCBForm: TPanPCBForm
     Hint = 'Enter or Clipboard'
     TabOrder = 0
     Text = 'editboxSelectRow'
+  end
+  object cbOriginMode: TComboBox
+    Left = 35
+    Top = 118
+    Width = 145
+    Height = 21
+    TabOrder = 3
+    Text = 'Origin Modes'
+    OnChange = cbOriginModeChange
   end
   object Timer1: TTimer
     OnTimer = Timer1Timer
