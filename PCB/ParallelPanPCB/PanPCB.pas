@@ -18,6 +18,7 @@ Author BL Miller
 20230611   0.21 match undisplayed layers in other Pcbdocs as they are selected.
 20230613   0.22 locate & pan matching selected CMP by designator
 20230614   0.23 Three origin modes: board, bottom left & centre of board.
+20230615   0.24 support PcbLib by focusing selected FP
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
@@ -29,15 +30,19 @@ const
     bLongTrue     = -1;
     cEnumBoardRef = 'Board Origin|Bottom Left|Centre';
 
-function FocusedPCB(dummy : integer) : boolean;     forward;
+function FocusedPCB(dummy : integer) : boolean;       forward;
+function FocusedLib(dummy : integer) : boolean;       forward;
+function AllPcbDocs(dummy : integer) : TStringList;   forward;
+function AllPcbLibs(dummy : integer) : TStringList;   forward;
 function GetViewRect(APCB : IPCB_Board) : TCoordRect; forward;
-function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect;       forward;
-function IsFlipped(dummy : integer) : boolean;      forward;
+function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect; forward;
+function IsFlipped(dummy : integer) : boolean;        forward;
 function FindLayerObj(ABrd : IPCB_Board, Layer : TLayer) : IPCB_LayerObject; forward;
 function ClearBoardSelections(ABrd : IPCB_Board) : boolean; forward;
 
 var
     CurrentPCB     : IPCB_Board;
+    CurrentLib     : IPCB_Library;
     CurrentServDoc : IServerDocument;
     slBoardRef     : TStringList;
     iBoardRef      : integer;
@@ -51,6 +56,7 @@ begin
     If PcbServer = nil then exit;
 
     FocusedPCB(1);
+    FocusedLib(1);
     bSameScale := false;
     bCenterCMP := true;
     iBoardRef := 0;
@@ -63,63 +69,24 @@ begin
     PanPCBForm.Show;
 end;
 
-function FocusedPCB(dummy : integer) : boolean;
-var
-    SM      : IServerModule;
-    ServDoc : IServerDocument;
-    I       : integer;
-begin
-    Result := false;
-
-    SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
-    begin
-        ServDoc := SM.Documents(I);
-        if (ServDoc.Kind = cDocKind_Pcb) then
-        if (ServDoc.IsShown = bLongTrue) then
-        begin
-            CurrentServDoc := ServDoc;
-            CurrentPCB := PCBServer.GetCurrentPCBBoard;
-            if CurrentPCB <> nil then
-                Result := true;
-        end;
-    end;
-end;
-
-function AllPcbDocs(dummy : integer) : TStringList;
-var
-    SM      : IServerModule;
-    Prj     : IProject;
-    ServDoc : IServerDocument;
-    Doc     : IDocument;
-    I, J    : integer;
-begin
-    Result := TStringlist.Create;
-
-    SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
-    begin
-        ServDoc := SM.Documents(I);
-        if (ServDoc.Kind = cDocKind_Pcb) then
-            Result.AddObject(ServDoc.FileName, ServDoc);
-    end;
-end;
-
 function PanOtherPCBDocs(dummy : integer) : boolean;
 var
     PCBSysOpts : IPCB_SystemOptions;
     LayerStack : IPCB_LayerStack_V7;
     ServDoc    : IServerDocument;
     OBrd       : IPCB_Board;
+    OLib       : IPCB_Library;
     MechLayer  : IPCB_MechanicalLayer;
     VLSet      : IPCB_LayerSet;
     Prim       : IPCB_Primitive;
     CMP        : IPCB_Component;
     OCMP       : IPCB_Component;
+    LibCMP     : IPCB_LibComponent;
     OBO        : TCoordPoint;
     OVR        : TcoordRect;
     DocFPath   : WideString;
     BrdList    : TStringlist;
+    PcbLibList : TStringlist;
     I, J       : integer;
     CLayer     : TLayer;
     OLayer     : TLayer;
@@ -131,10 +98,6 @@ var
     OBFlipped   : boolean;
     bView3D     : boolean;
     CGV    : IPCB_GraphicalView;
-    CGVM   : TPCBViewMode;
-//    CWidth, wParam, lParam : integer;
-//    ConfigType : WideString;
-//    Config     : WideString;
 begin
     Result := false;
 
@@ -186,8 +149,6 @@ begin
                 end;
             end;
 
-            CGV  := OBrd.GetState_MainGraphicalView;
-
             if not IsMLayer then
             if not OBrd.VisibleLayers.Contains(CLayer) then
             begin
@@ -208,13 +169,11 @@ begin
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
 
-//            CGV.SetIs3D(bView3D);                    // partially works
-
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
             begin
+// this section never executes!!
                 OBrd.CurrentLayer := CLayer;
-//                Client.SendMessage('PCB:SetCurrentLayer', 'Layer=' + IntToStr(CLayer) , 255, Client.CurrentView);
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
 
@@ -236,12 +195,32 @@ begin
     PCBServer.GetPCBBoardByBoardID(CurrentPCB.BoardID);
     CurrentServDoc.Focus;
     BrdList.Clear;
+
+// PcbLibs open
+    If CMP <> nil then
+    begin
+        PcbLibList := AllPcbLibs(1);
+        for I := 0 to (PcbLibList.Count -1 ) do
+        begin
+            DocFPath := PcbLibList.Strings(I);
+            ServDoc  := PcbLibList.Objects(I);
+            OLib     := PCBServer.GetPCBLibraryByPath(DocFPath);
+            LibCMP := OLib.GetComponentByName(CMP.Pattern);
+            OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
+//            OLib.RefreshView;
+            LibCMP.Board.ViewManager_FullUpdate;
+        end;
+        PcbLibList.Clear;
+    end;
 end;
 
-function GetViewCursor(dummy : integer) : TCoordPoint;
+function GetViewCursor(DocKind : WideString) : TCoordPoint;
 begin
     Result := TPoint;
-    Result := Point(CurrentPCB.XCursor - CurrentPCB.XOrigin, CurrentPCB.YCursor - CurrentPCB.YOrigin);
+    if DocKind = cDocKind_PcbLib then
+        Result := Point(CurrentLib.Board.XCursor - CurrentLib.Board.XOrigin, CurrentLib.Board.YCursor - CurrentLib.Board.YOrigin)
+    else
+        Result := Point(CurrentPCB.XCursor - CurrentPCB.XOrigin, CurrentPCB.YCursor - CurrentPCB.YOrigin);
 end;
 
 function GetViewRect(APCB : IPCB_Board) : TCoordRect;
@@ -261,7 +240,6 @@ var
    CBO : TCoordRect;
    OBBOR : TCoordRect;
    CBBOR : TCoordRect;
-
 begin
     OBBOR := OPCB.BoardOutline.BoundingRectangle;
     CBBOR := CPCB.BoardOutline.BoundingRectangle;
@@ -322,6 +300,9 @@ var
     I   : integer;
 begin
     Result := false;
+    ABrd.SelectedObjects_BeginUpdate;
+    ABrd.SelectedObjects_Clear;
+    ABrd.SelectedObjects_EndUpdate;
     for I := 0 to (ABrd.SelectecObjectCount - 1) do
     begin
         CMP := ABrd.SelectecObject(I);
@@ -342,6 +323,99 @@ begin
         if LO.V7_LayerID.ID = Layer then
             Result := LO;
         LO := Board.MasterLayerStack.Next(eLayerClass_All, LO);
+    end;
+end;
+
+function AllPcbDocs(dummy : integer) : TStringList;
+var
+    SM      : IServerModule;
+    Prj     : IProject;
+    ServDoc : IServerDocument;
+    Doc     : IDocument;
+    I, J    : integer;
+begin
+    Result := TStringlist.Create;
+    SM := Client.ServerModuleByName('PCB');
+    for I := 0 to (SM.DocumentCount -1) do
+    begin
+        ServDoc := SM.Documents(I);
+        if (ServDoc.Kind = cDocKind_Pcb) then
+            Result.AddObject(ServDoc.FileName, ServDoc);
+    end;
+end;
+
+function AllPcbLibs(dummy : integer) : TStringList;
+var
+    SM      : IServerModule;
+    Prj     : IProject;
+    ServDoc : IServerDocument;
+    Doc     : IDocument;
+    I, J    : integer;
+begin
+    Result := TStringlist.Create;
+
+    SM := Client.ServerModuleByName('PCB');
+    for I := 0 to (SM.DocumentCount -1) do
+    begin
+        ServDoc := SM.Documents(I);
+        if (ServDoc.Kind = cDocKind_PcbLib) then
+            Result.AddObject(ServDoc.FileName, ServDoc);
+    end;
+end;
+
+function FocusedPCB(dummy : integer) : boolean;
+var
+    SM      : IServerModule;
+    ServDoc : IServerDocument;
+    APCB    : IPCB_Board;
+    I       : integer;
+begin
+    Result := false;
+
+    SM := Client.ServerModuleByName('PCB');
+    for I := 0 to (SM.DocumentCount -1) do
+    begin
+        ServDoc := SM.Documents(I);
+        if (ServDoc.Kind = cDocKind_Pcb) then
+        if (ServDoc.IsShown = bLongTrue) then
+        begin
+            CurrentServDoc := ServDoc;
+            APCB := PCBServer.GetCurrentPCBBoard;
+            if APCB <> nil then
+            if APCB.Filename = ServDoc.FileName then
+            begin
+                CurrentPCB := APCB;
+                Result := true;
+            end;
+        end;
+    end;
+end;
+
+function FocusedLib(dummy : integer) : boolean;
+var
+    SM      : IServerModule;
+    ServDoc : IServerDocument;
+    APCB    : IPCB_Library;
+    I       : integer;
+begin
+    Result := false;
+
+    SM := Client.ServerModuleByName('PCB');
+    for I := 0 to (SM.DocumentCount -1) do
+    begin
+        ServDoc := SM.Documents(I);
+        if (ServDoc.Kind = cDocKind_PcbLib) then
+        if (ServDoc.IsShown = bLongTrue) then
+        begin
+            CurrentServDoc := ServDoc;
+            APCB := PCBServer.GetCurrentPCBLibrary;
+            if APCB <> nil then
+            if APCB.Board.Filename = ServDoc.FileName then
+            begin
+                CurrentLib := APCB;
+                Result := true;
+            end;
+        end;
     end;
 end;
 

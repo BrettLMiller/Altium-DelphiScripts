@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230614   0.23
+ 20230615   0.24
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);
@@ -37,18 +37,36 @@ end;
 
 procedure TPanPCBForm.Timer1Timer(Sender: TObject);
 var
-    VC : TcoordPoint;
+    VC     : TcoordPoint;
+    HasPCB : boolean;
+    HasLIB : boolean;
+    FileName : WideString;
 begin
     VC := nil;
-    If not FocusedPCB(1) then exit;
+    FileName := 'no focused file';
+    HasPCB := FocusedPCB(1);
+    HasLIB := FocusedLib(1);
 
-    VC := GetViewCursor(1);
+    if not(HasPCB or HasLIB) then exit;
+    if HasPCB then
+    begin
+        Filename := ExtractFileName(CurrentPCB.FileName);
+        VC := GetViewCursor(cDocKind_Pcb);
+    end;
+    if HasLIB then
+    begin
+        Filename := ExtractFileName(CurrentLib.Board.FileName);
+        VC := GetViewCursor(cDocKind_PcbLib);
+    end;
+
+    PanPCBForm.editboxCurrentPcbDoc.Text := FileName;
+
     if VC <> nil then
     begin
         sEntry := 'X' + CoordUnitToString(VC.X, eMM) + '  Y ' + CoordUnitToString(VC.Y, eMM);
         PanPCBForm.editboxSelectRow.Text  := sEntry;
-        PanPCBForm.editboxCurrentPcbDoc.Text := CurrentPCB.FileName;
     end;
+
     PanOtherPCBDocs(1);
 end;
 
