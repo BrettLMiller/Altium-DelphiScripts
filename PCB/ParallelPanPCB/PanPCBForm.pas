@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230615   0.24
+ 20230616   0.26
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);
@@ -10,64 +10,64 @@ Interface    // this is ignored in delphiscript.
 type
     TPanPCBForm = class(TForm)
     editboxSelectRow     : TEdit;
-    editboxCurrentPcbDoc : TEdit;
+    ebCurrentPcbDoc      : TEdit;
     cbOriginMode         : TComboBox;
     btnSpareButton       : TButton;
+    ebFootprintName      : TTextBox;
+    ebLibraryName        : TTextBox;
+    sbStatusBar1         : TStatusBar;
 end;
 
 const
-    fMouseOverForm = 0;
+    fMouseOverForm   = 0;
     fMouseOverTarget = 1;
-
+    fTimerRunning    = 3;
 var
-    fState : integer;
-    sEntry : WideString;
+    fState          : integer;
+    sbStatusBar1    : TStatusBar;
+    ebFootprintName : TEdit;
+    ebLibraryName   : TEdit;
+    cbStrictLibrary : TCheckBox;
 
 procedure TPanPCBForm.PanPCBFormShow(Sender: TObject);
 begin
     PanPCBForm.cbOriginMode.Items.AddStrings(slBoardRef);
     fState := fMouseOverForm;
     PanPCBForm.Timer1.Enabled := false;
+    PanPCBForm.cbStrictLibrary.Checked := bExactLibName;
 end;
 
 procedure TPanPCBForm.PanPCBFormClose(Sender: TObject; var Action: TCloseAction);
 begin
     PanPCBForm.Timer1.Enabled := false;
+    CleanExit(1);
 end;
 
 procedure TPanPCBForm.Timer1Timer(Sender: TObject);
 var
-    VC     : TcoordPoint;
-    HasPCB : boolean;
-    HasLIB : boolean;
-    FileName : WideString;
+    VC       : TCoordPoint;
+    TBoxText : WideString;
 begin
     VC := nil;
-    FileName := 'no focused file';
-    HasPCB := FocusedPCB(1);
-    HasLIB := FocusedLib(1);
+    TBoxText := 'no file';
+    bExactLibName := PanPCBForm.cbStrictLibrary.Checked;
+    PanPCBForm.ebFootprintName.Text := 'no footprint selected';
+    PanPCBForm.ebLibraryName.Text   := ' ';
 
-    if not(HasPCB or HasLIB) then exit;
-    if HasPCB then
-    begin
-        Filename := ExtractFileName(CurrentPCB.FileName);
-        VC := GetViewCursor(cDocKind_Pcb);
-    end;
-    if HasLIB then
-    begin
-        Filename := ExtractFileName(CurrentLib.Board.FileName);
-        VC := GetViewCursor(cDocKind_PcbLib);
-    end;
+    RefreshFocus(1);
 
-    PanPCBForm.editboxCurrentPcbDoc.Text := FileName;
-
+    VC := GetCursorView(TBoxText);
+    PanPCBForm.ebCurrentPcbDoc.Text := TBoxText;
+    PanPCBForm.ebFootprintName.Text := GetCurrentFPName(1);
+    PanPCBForm.ebLibraryName.Text   := GetCurrentFPLibraryName(1);
     if VC <> nil then
     begin
-        sEntry := 'X' + CoordUnitToString(VC.X, eMM) + '  Y ' + CoordUnitToString(VC.Y, eMM);
-        PanPCBForm.editboxSelectRow.Text  := sEntry;
+        TBoxText := 'X' + CoordUnitToString(VC.X, eMM) + '  Y ' + CoordUnitToString(VC.Y, eMM);
+        PanPCBForm.editboxSelectRow.Text  := TBoxText;
     end;
 
     PanOtherPCBDocs(1);
+    PanOtherPcbLibs(1);
 end;
 
 procedure TPanPCBForm.cbOriginModeChange(Sender: TObject);
@@ -83,10 +83,12 @@ procedure TPanPCBForm.PanPCBFormMouseLeave(Sender: TObject);
 begin
     cbOriginMode.ItemIndex := iBoardRef;
     PanPCBForm.Timer1.Enabled := true;
+    fState := fTimerRunning;
 end;
 
 procedure TPanPCBForm.PanPCBFormMouseEnter(Sender: TObject);
 begin
     PanPCBForm.Timer1.Enabled := false;
+    fState := fMouseOverForm;
 end;
 

@@ -2,6 +2,8 @@
 
 Allows Pan & zoom across multiple PcbDocs w.r.t individual board origin.
 Any Pcbdoc can be used to move all others.
+Can select different effective origins
+Can select components.
 
 Set to 1sec refresh.
 Click or mouse over the form to start.
@@ -19,6 +21,8 @@ Author BL Miller
 20230613   0.22 locate & pan matching selected CMP by designator
 20230614   0.23 Three origin modes: board, bottom left & centre of board.
 20230615   0.24 support PcbLib by focusing selected FP
+20230616   0.25 selected component information.
+20230616   0.26 refactor: split processes, move out of form code.
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
@@ -29,9 +33,13 @@ SetState_CurrentLayer does not exist, & .CurrentLayer appears to fail to set oth
 const
     bLongTrue     = -1;
     cEnumBoardRef = 'Board Origin|Bottom Left|Centre';
+    cNone   = 0;
+    cPcbDoc = 1;
+    cPcbLib = 2;
 
 function FocusedPCB(dummy : integer) : boolean;       forward;
 function FocusedLib(dummy : integer) : boolean;       forward;
+function RefreshFocus(dummy : integer) : boolean;     forward;
 function AllPcbDocs(dummy : integer) : TStringList;   forward;
 function AllPcbLibs(dummy : integer) : TStringList;   forward;
 function GetViewRect(APCB : IPCB_Board) : TCoordRect; forward;
@@ -44,10 +52,16 @@ var
     CurrentPCB     : IPCB_Board;
     CurrentLib     : IPCB_Library;
     CurrentServDoc : IServerDocument;
+    CurrentCMP     : IPCB_Component;
+    CurrentPLC     : IPCB_LibComponent;
     slBoardRef     : TStringList;
+    BrdList        : TStringlist;
+    PcbLibList     : TStringlist;
     iBoardRef      : integer;
     bSameScale     : boolean;
     bCenterCMP     : boolean;
+    iDocKind       : integer;
+    bExactLibName  : boolean;
 
 procedure PanPCBs;
 begin
@@ -55,8 +69,13 @@ begin
     if not Client.StartServer('PCB') then exit;
     If PcbServer = nil then exit;
 
-    FocusedPCB(1);
-    FocusedLib(1);
+    iDocKind   := cNone;
+    bExactLibName := false;
+    CurrentPCB := nil;
+    CurrentLib := nil;
+    CurrentCMP := nil;
+    CurrentPLC := nil;
+    RefreshFocus(1);
     bSameScale := false;
     bCenterCMP := true;
     iBoardRef := 0;
@@ -69,24 +88,29 @@ begin
     PanPCBForm.Show;
 end;
 
+function RefreshFocus(dummy : integer) : boolean;
+begin
+    Result := false;
+    BrdList    := AllPcbDocs(1);
+    PcbLibList := AllPcbLibs(1);
+    FocusedPCB(1);
+    FocusedLib(1);
+    Result := true;
+end;
+
 function PanOtherPCBDocs(dummy : integer) : boolean;
 var
     PCBSysOpts : IPCB_SystemOptions;
     LayerStack : IPCB_LayerStack_V7;
     ServDoc    : IServerDocument;
     OBrd       : IPCB_Board;
-    OLib       : IPCB_Library;
     MechLayer  : IPCB_MechanicalLayer;
     VLSet      : IPCB_LayerSet;
     Prim       : IPCB_Primitive;
-    CMP        : IPCB_Component;
     OCMP       : IPCB_Component;
-    LibCMP     : IPCB_LibComponent;
     OBO        : TCoordPoint;
     OVR        : TcoordRect;
     DocFPath   : WideString;
-    BrdList    : TStringlist;
-    PcbLibList : TStringlist;
     I, J       : integer;
     CLayer     : TLayer;
     OLayer     : TLayer;
@@ -98,31 +122,35 @@ var
     OBFlipped   : boolean;
     bView3D     : boolean;
     CGV    : IPCB_GraphicalView;
+    CGVM   : TPCBViewMode;
+//    CWidth, wParam, lParam : integer;
+//    ConfigType : WideString;
+//    Config     : WideString;
 begin
     Result := false;
+    CurrentCMP := nil;
+    if CurrentPCB = nil then exit;
 
-    CMP := nil;
     if CurrentPCB.SelectecObjectCount > 0 then
     begin
         Prim := CurrentPCB.SelectecObject(0);
-        if Prim.ObjectID = eComponentObject then CMP := Prim;
-        if Prim.InComponent then CMP := Prim.Component;
+        if Prim.ObjectID = eComponentObject then CurrentCMP := Prim;
+        if Prim.InComponent then CurrentCMP := Prim.Component;
     end;
 
-    CLayer   := CurrentPCB.GetState_CurrentLayer;
-    IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
+        CLayer   := CurrentPCB.GetState_CurrentLayer;
+        IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
 
     if IsMLayer then
     begin
-        LayerStack := CurrentPCB.LayerStack_V7;
-        MechLayer := LayerStack.LayerObject_V7[CLayer];
-        SLayerMode := MechLayer.DisplayInSingleLayerMode;
+            LayerStack := CurrentPCB.LayerStack_V7;
+            MechLayer := LayerStack.LayerObject_V7[CLayer];
+            SLayerMode := MechLayer.DisplayInSingleLayerMode;
     end;
 
-    CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
-    bView3D := CGV.Is3D;
+        CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
+        bView3D := CGV.Is3D;
 
-    BrdList := AllPcbDocs(1);
     for I := 0 to (BrdList.Count -1 ) do
     begin
         DocFPath := BrdList.Strings(I);
@@ -136,11 +164,11 @@ begin
         begin
             ServDoc.Focus;
             OCMP := nil;
-            if CMP <> nil then
+            if CurrentCMP <> nil then
             begin
                 ClearBoardSelections(OBrd);
 //                OBrd.SetState_Navigate_HighlightObjectList(eHighlight_Filter,true);
-                OCMP := OBrd.GetPcbComponentByRefDes(CMP.Name.Text);
+                OCMP := OBrd.GetPcbComponentByRefDes(CurrentCMP.Name.Text);
                 if OCMP <> nil then
                 begin
                     OCMP.Selected := true;
@@ -149,12 +177,12 @@ begin
                 end;
             end;
 
+            CGV  := OBrd.GetState_MainGraphicalView;
+
             if not IsMLayer then
             if not OBrd.VisibleLayers.Contains(CLayer) then
             begin
                 OBrd.VisibleLayers.Include(CLayer);
-                CLO := FindLayerObj(CurrentPCB, CLayer);
-
                 OBrd.LayerIsDisplayed(CLayer) := true;
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
@@ -168,6 +196,8 @@ begin
                 MechLayer.SetState_DisplayInSingleLayerMode(SLayerMode);
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
+
+//            CGV.SetIs3D(bView3D);                    // partially works
 
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
@@ -194,33 +224,109 @@ begin
 
     PCBServer.GetPCBBoardByBoardID(CurrentPCB.BoardID);
     CurrentServDoc.Focus;
-    BrdList.Clear;
+end;
 
+function PanOtherPcbLibs(dummy : integer) : boolean;
+var
+    ServDoc    : IServerDocument;
+    OLib       : IPCB_Library;
+    DocFPath   : WideString;
+    LibCMP     : IPCB_LibComponent;
+    LCMPName   : Widestring;
+    I          : integer;
+begin
+    Result := false;
 // PcbLibs open
-    If CMP <> nil then
+    If CurrentCMP <> nil then
     begin
-        PcbLibList := AllPcbLibs(1);
         for I := 0 to (PcbLibList.Count -1 ) do
         begin
             DocFPath := PcbLibList.Strings(I);
             ServDoc  := PcbLibList.Objects(I);
+            if bExactLibName then
+            if ExtractFileName(CurrentCMP.SourceFootprintLibrary) <> ExtractFileName(DocFPath) then
+                continue;
+
             OLib     := PCBServer.GetPCBLibraryByPath(DocFPath);
-            LibCMP := OLib.GetComponentByName(CMP.Pattern);
-            OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
-//            OLib.RefreshView;
-            LibCMP.Board.ViewManager_FullUpdate;
+            LCMPName := OLib.GetUniqueCompName(CurrentCMP.Pattern);
+            if LCMPName <> CurrentCMP.Pattern then
+            begin
+                LibCMP := OLib.GetComponentByName(CurrentCMP.Pattern);
+                if LibCMP <> nil then
+                begin
+                    OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
+                    LibCMP.Board.ViewManager_FullUpdate;
+                end;
+            end;
         end;
-        PcbLibList.Clear;
     end;
 end;
 
-function GetViewCursor(DocKind : WideString) : TCoordPoint;
+function GetCurrentFPName(dummy : integer) : widestring;
+begin
+    Result := 'no footprint selected';
+    if iDocKind = cPcbDoc then
+    if CurrentCMP <> nil then
+        Result := CurrentCMP.Pattern;
+    if iDocKind = cPcbLib then
+    if CurrentPLC <> nil then
+        Result := CurrentPLC.Name;
+end;
+
+function GetCurrentFPLibraryName(dummy : integer) : widestring;
+var
+    SourceCMPLibRef : widestring;
+begin
+    Result := 'no footprint selected';
+    if iDocKind = cPcbDoc then
+    if CurrentCMP <> nil then
+    begin
+        SourceCMPLibRef := ExtractFileName(CurrentCMP.SourceLibReference);
+        if SourceCMPLibRef = '' then
+            SourceCMPLibRef := 'NO CompSource LibRef';
+        Result := SourceCMPLibRef + ' / ' + ExtractFileName(CurrentCMP.SourceFootprintLibrary);
+    end;
+    if iDocKind = cPcbLib then
+    if CurrentPLC <> nil then
+        Result := 'n/a';
+end;
+
+function CleanExit(dummy : integer) : boolean;
+begin
+    if BrdList <> nil then BrdList.Clear;
+    if PcbLibList  <> nil then PcbLibList.Clear;
+end;
+
+function GetCursorPoint(DocKind : WideString) : TCoordPoint;
 begin
     Result := TPoint;
     if DocKind = cDocKind_PcbLib then
         Result := Point(CurrentLib.Board.XCursor - CurrentLib.Board.XOrigin, CurrentLib.Board.YCursor - CurrentLib.Board.YOrigin)
     else
         Result := Point(CurrentPCB.XCursor - CurrentPCB.XOrigin, CurrentPCB.YCursor - CurrentPCB.YOrigin);
+end;
+
+function GetCursorView (var FileName : WideString) : TCoordPoint;
+var
+    HasPCB : boolean;
+    HasLIB : boolean;
+begin
+    Result := nil;
+    FileName := 'no focused file';
+
+    HasPCB := FocusedPCB(1);
+    HasLIB := FocusedLib(1);
+
+    if HasPCB then
+    begin
+        Filename := ExtractFileName(CurrentPCB.FileName);
+        Result   := GetCursorPoint(cDocKind_Pcb);
+    end;
+    if HasLIB then
+    begin
+        Filename := ExtractFileName(CurrentLib.Board.FileName);
+        Result   := GetCursorPoint(cDocKind_PcbLib);
+    end;
 end;
 
 function GetViewRect(APCB : IPCB_Board) : TCoordRect;
@@ -322,7 +428,7 @@ begin
     begin
         if LO.V7_LayerID.ID = Layer then
             Result := LO;
-        LO := Board.MasterLayerStack.Next(eLayerClass_All, LO);
+        LO := ABrd.MasterLayerStack.Next(eLayerClass_All, LO);
     end;
 end;
 
@@ -385,6 +491,7 @@ begin
             if APCB.Filename = ServDoc.FileName then
             begin
                 CurrentPCB := APCB;
+                iDocKind := cPcbDoc;
                 Result := true;
             end;
         end;
@@ -413,6 +520,8 @@ begin
             if APCB.Board.Filename = ServDoc.FileName then
             begin
                 CurrentLib := APCB;
+                CurrentPLC := APCB.GetState_CurrentComponent;
+                iDocKind := cPcbLib;
                 Result := true;
             end;
         end;

@@ -90,11 +90,11 @@ Value=2023-06-14
 
 [Parameter5]
 Name=VersionCode
-Value=0.23
+Value=0.26
 
 [Parameter6]
 Name=VersionForm
-Value=0.20
+Value=0.26
 
 [Generic_Watches]
 0=Return
