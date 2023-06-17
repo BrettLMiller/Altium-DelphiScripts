@@ -46,7 +46,8 @@ Notes:
                  Import: Altium rearranges layer names when creating a pair; Force our layer names
  23/08/2022 1.45 try simplify process flow for import. Add LayerID to export & best guess for PairKinds.
  01/03/2023 1.46 add missing/new layerkinds
- 14/06/2023 1.50 need to remove layerkind existing in board before can assign it to new layer.
+ 2023-06-14 1.50 Import: need to remove layerkind existing in board before can assign it to new layer.
+ 2023-06-17 1.51 Import: simple layername check for keyword to determine top or bottom
 
 
   TMechanicalLayerToKindItem
@@ -417,10 +418,15 @@ begin
 //                end;
 
 // does ML2 name (from file) match ML1 paired layer name
+// simple laayername text match for bottom vs top.
                 MechPairIdx := -1;
                 if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML1, ML2) then
-                    MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)       // index? to what FFS
-
+                begin
+                    if (pos(ctTop, LayerName2) > 0)  and (pos(ctBottom, LayerName1) > 0) then
+                        MechPairIdx := MechLayerPairs.AddPair(ML2, ML1)
+                    else
+                        MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)       // index? to what FFS
+                end;
                 if not LegacyMLS then
                 begin
                     MechLayer2.Kind := MLayerKind2;
@@ -430,7 +436,7 @@ begin
                         MechLayerPairs.LayerPairKind(MechPairIdx) := MLayerPairKind;
 
                         if MLayerPairKind <> MLayerPairKind2 then
-                        ShowMessage('mismatch pair kinds ' + LayerName1 + '---' + LayerName2);
+                            ShowMessage('mismatch pair kinds ' + LayerName1 + '---' + LayerName2);
                     end;
                 end;
 
