@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230616   0.26
+ 20230617   0.27
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);
@@ -12,7 +12,6 @@ type
     editboxSelectRow     : TEdit;
     ebCurrentPcbDoc      : TEdit;
     cbOriginMode         : TComboBox;
-    btnSpareButton       : TButton;
     ebFootprintName      : TTextBox;
     ebLibraryName        : TTextBox;
     sbStatusBar1         : TStatusBar;
@@ -23,18 +22,24 @@ const
     fMouseOverTarget = 1;
     fTimerRunning    = 3;
 var
-    fState          : integer;
-    sbStatusBar1    : TStatusBar;
-    ebFootprintName : TEdit;
-    ebLibraryName   : TEdit;
-    cbStrictLibrary : TCheckBox;
+    fState           : integer;
+    sbStatusBar1     : TStatusBar;
+    ebFootprintName  : TEdit;
+    ebLibraryName    : TEdit;
+    cbStrictLibrary  : TCheckBox;
+    cbOpenLibrary    : TCheckBox;
+    cbAnyLibPath     : TCheckBox;
+    XPDirectoryEdit1 : TXPDirectoryEdit;
 
 procedure TPanPCBForm.PanPCBFormShow(Sender: TObject);
 begin
     PanPCBForm.cbOriginMode.Items.AddStrings(slBoardRef);
     fState := fMouseOverForm;
-    PanPCBForm.Timer1.Enabled := false;
-    PanPCBForm.cbStrictLibrary.Checked := bExactLibName;
+    PanPCBForm.Timer1.Enabled              := false;
+    PanPCBForm.cbStrictLibrary.Checked     := bExactLibName;
+    PanPCBForm.cbOpenLibrary.Checked       := bOpenLibs;
+    PanPCBForm.cbAnyLibPath.Checked        := bAnyLibPath;
+    PanPCBForm.XPDirectoryEdit1.InitialDir := SearchPath;
 end;
 
 procedure TPanPCBForm.PanPCBFormClose(Sender: TObject; var Action: TCloseAction);
@@ -51,6 +56,9 @@ begin
     VC := nil;
     TBoxText := 'no file';
     bExactLibName := PanPCBForm.cbStrictLibrary.Checked;
+    bOpenLibs     := PanPCBForm.cbOpenLibrary.Checked;
+    bAnyLibPath   := PanPCBForm.cbAnyLibPath.Checked;
+
     PanPCBForm.ebFootprintName.Text := 'no footprint selected';
     PanPCBForm.ebLibraryName.Text   := ' ';
 
@@ -81,8 +89,9 @@ end;
 
 procedure TPanPCBForm.PanPCBFormMouseLeave(Sender: TObject);
 begin
-    cbOriginMode.ItemIndex := iBoardRef;
-    PanPCBForm.Timer1.Enabled := true;
+    cbOriginMode.ItemIndex           := iBoardRef;
+    PanPCBForm.XPDirectoryEdit1.Text := SearchPath;
+    PanPCBForm.Timer1.Enabled        := true;
     fState := fTimerRunning;
 end;
 
@@ -90,5 +99,17 @@ procedure TPanPCBForm.PanPCBFormMouseEnter(Sender: TObject);
 begin
     PanPCBForm.Timer1.Enabled := false;
     fState := fMouseOverForm;
+end;
+
+procedure TPanPCBForm.cbAnyLibPathClick(Sender: TObject);
+begin
+    if not PanPCBForm.cbAnyLibPath.Checked then exit;
+    SearchPath := PanPCBForm.XPDirectoryEdit1.Text;
+end;
+
+
+procedure TPanPCBForm.XPDirectoryEdit1Change(Sender: TObject);
+begin
+    SearchPath := PanPCBForm.XPDirectoryEdit1.Text;
 end;
 

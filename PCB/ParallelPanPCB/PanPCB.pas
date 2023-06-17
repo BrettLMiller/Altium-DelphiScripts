@@ -4,6 +4,12 @@ Allows Pan & zoom across multiple PcbDocs w.r.t individual board origin.
 Any Pcbdoc can be used to move all others.
 Can select different effective origins
 Can select components.
+Pans to selected component in open PcbLibs
+Can open PcbLib using Component footprint name & library
+
+Strict Library Match  : PcbLib filename must match Footprint source library
+Allow Open            : allow opening any PcbLib with filename match in Workspace.
+Any Path              : find a copy of PcbLib anywhere Workspace or in a folder branch .
 
 Set to 1sec refresh.
 Click or mouse over the form to start.
@@ -23,25 +29,27 @@ Author BL Miller
 20230615   0.24 support PcbLib by focusing selected FP
 20230616   0.25 selected component information.
 20230616   0.26 refactor: split processes, move out of form code.
+20230617   0.27 open PcbLibs & focus select footprint model
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
-cross highlight CMP with same designator
 
 SetState_CurrentLayer does not exist, & .CurrentLayer appears to fail to set other PcbDocs.
 }
 const
-    bLongTrue     = -1;
+    cLongTrue     = -1;
     cEnumBoardRef = 'Board Origin|Bottom Left|Centre';
     cNone   = 0;
     cPcbDoc = 1;
     cPcbLib = 2;
+    cInitSearchPath = 'c:\Altium';
 
 function FocusedPCB(dummy : integer) : boolean;       forward;
 function FocusedLib(dummy : integer) : boolean;       forward;
 function RefreshFocus(dummy : integer) : boolean;     forward;
 function AllPcbDocs(dummy : integer) : TStringList;   forward;
 function AllPcbLibs(dummy : integer) : TStringList;   forward;
+function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;     forward;
 function GetViewRect(APCB : IPCB_Board) : TCoordRect; forward;
 function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect; forward;
 function IsFlipped(dummy : integer) : boolean;        forward;
@@ -62,6 +70,9 @@ var
     bCenterCMP     : boolean;
     iDocKind       : integer;
     bExactLibName  : boolean;
+    bOpenLibs      : boolean;
+    bAnyLibPath    : boolean;
+    SearchPath     : Widestring;
 
 procedure PanPCBs;
 begin
@@ -69,20 +80,24 @@ begin
     if not Client.StartServer('PCB') then exit;
     If PcbServer = nil then exit;
 
-    iDocKind   := cNone;
-    bExactLibName := false;
-    CurrentPCB := nil;
-    CurrentLib := nil;
-    CurrentCMP := nil;
-    CurrentPLC := nil;
-    RefreshFocus(1);
-    bSameScale := false;
-    bCenterCMP := true;
-    iBoardRef := 0;
     slBoardRef := TStringList.Create;
     slBoardRef.Delimiter := '|';
     slBoardRef.StrictDelimiter := true;
     slBoardRef.DelimitedText := cEnumBoardRef;
+    iDocKind      := cNone;
+    bExactLibName := true;
+    bOpenLibs     := false;
+    bAnyLibPath   := false;
+    SearchPath    := cInitSearchPath;
+    CurrentPCB := nil;
+    CurrentLib := nil;
+    CurrentCMP := nil;
+    CurrentPLC := nil;
+    bSameScale := false;
+    bCenterCMP := true;
+    iBoardRef  := 0;
+
+    RefreshFocus(1);
 
     PanPCBForm.FormStyle := fsStayOnTop;
     PanPCBForm.Show;
@@ -123,9 +138,6 @@ var
     bView3D     : boolean;
     CGV    : IPCB_GraphicalView;
     CGVM   : TPCBViewMode;
-//    CWidth, wParam, lParam : integer;
-//    ConfigType : WideString;
-//    Config     : WideString;
 begin
     Result := false;
     CurrentCMP := nil;
@@ -148,8 +160,8 @@ begin
             SLayerMode := MechLayer.DisplayInSingleLayerMode;
     end;
 
-        CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
-        bView3D := CGV.Is3D;
+     CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
+     bView3D := CGV.Is3D;
 
     for I := 0 to (BrdList.Count -1 ) do
     begin
@@ -178,7 +190,6 @@ begin
             end;
 
             CGV  := OBrd.GetState_MainGraphicalView;
-
             if not IsMLayer then
             if not OBrd.VisibleLayers.Contains(CLayer) then
             begin
@@ -228,11 +239,14 @@ end;
 
 function PanOtherPcbLibs(dummy : integer) : boolean;
 var
+    Prj        : IProject;
     ServDoc    : IServerDocument;
+    PrjDoc     : IDocument;
     OLib       : IPCB_Library;
     DocFPath   : WideString;
     LibCMP     : IPCB_LibComponent;
     LCMPName   : Widestring;
+    FoundPath  : WideString;
     I          : integer;
 begin
     Result := false;
@@ -241,23 +255,93 @@ begin
     begin
         for I := 0 to (PcbLibList.Count -1 ) do
         begin
+            LCMPName := '';
             DocFPath := PcbLibList.Strings(I);
             ServDoc  := PcbLibList.Objects(I);
             if bExactLibName then
-            if ExtractFileName(CurrentCMP.SourceFootprintLibrary) <> ExtractFileName(DocFPath) then
+            if ExtractFileName(CurrentCMP.SourceFootprintLibrary) <> ExtractFileName(ServDoc.FileName) then
                 continue;
 
-            OLib     := PCBServer.GetPCBLibraryByPath(DocFPath);
-            LCMPName := OLib.GetUniqueCompName(CurrentCMP.Pattern);
+            OLib := PCBServer.GetPCBLibraryByPath(ServDoc.FileName);
+            if bOpenLibs then
+            if OLib = nil then
+            begin
+                OLib := PcbServer.LoadPcbBoardByPath(ServDoc.FileName);
+                Client.ShowDocument(ServDoc);
+            end;
+            if OLib <> nil then
+                LCMPName := OLib.GetUniqueCompName(CurrentCMP.Pattern);
+
+            if LCMPName <> '' then
             if LCMPName <> CurrentCMP.Pattern then
             begin
                 LibCMP := OLib.GetComponentByName(CurrentCMP.Pattern);
                 if LibCMP <> nil then
                 begin
+                    Servdoc.Focus;
                     OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
                     LibCMP.Board.ViewManager_FullUpdate;
+                    Result := true;
                 end;
             end;
+        end;
+
+        PrjDoc    := nil;
+        ServDoc   := nil;
+        FoundPath := SearchPath;
+        DocFPath  := CurrentCMP.SourceFootprintLibrary;
+// PCBLib not opened
+        if (not Result) and bOpenLibs then
+        begin
+            Prj := GetWorkspace.DM_FocusedProject;
+            if Prj <> nil then
+                PrjDoc := FindPrjDocByFileName(Prj, DocFPath);
+            if PrjDoc <> nil then
+                ServDoc := Client.OpenDocumentShowOrHide(cDocKind_PcbLib, PrjDoc.DM_FullPath, True);
+
+            if (ServDoc = nil) then
+            begin
+                Prj := GetWorkspace.DM_FreeDocumentsProject;
+                Prj.DM_BeginUpdate;
+                if  bAnyLibPath then
+                    FindFileInFolderBranch(DocFPath, FoundPath, 'P:\');
+                if Foundpath <> '' then
+                    ServDoc := Client.OpenDocumentShowOrHide(cDocKind_PcbLib, FoundPath, True);
+                if (ServDoc <> nil) then
+                    Prj.DM_AddSourceDocument(ServDoc.FileName);
+                Prj.DM_EndUpdate;
+            end;
+
+            if (ServDoc <> nil) then
+            begin
+
+                OLib := PCBServer.GetPCBLibraryByPath(ServDoc.FileName);
+                if OLib = nil then
+                    OLib := PcbServer.LoadPcbBoardByPath(ServDoc.FileName);
+                if OLib <> nil then Result := true;
+                Client.ShowDocument(ServDoc);
+                Servdoc.Focus;
+            end;
+            Prj.DM_RefreshInWorkspaceForm;
+        end;
+    end;
+end;
+
+// FindProjectDocumentByFileName() needs fullpath.
+function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;
+var
+   Doc : IDocument;
+   I   : integer;
+begin
+    Result := nil;
+    I := 0;
+    for I := 0 to Prj.DM_LogicalDocumentCount - 1 Do
+    begin
+        Doc := Prj.DM_LogicalDocuments(I);
+        if Doc.DM_Filename = ExtractFileName(FileName) then
+        begin
+            Result := Doc;
+            break;
         end;
     end;
 end;
@@ -483,7 +567,7 @@ begin
     begin
         ServDoc := SM.Documents(I);
         if (ServDoc.Kind = cDocKind_Pcb) then
-        if (ServDoc.IsShown = bLongTrue) then
+        if (ServDoc.IsShown = cLongTrue) then
         begin
             CurrentServDoc := ServDoc;
             APCB := PCBServer.GetCurrentPCBBoard;
@@ -512,7 +596,7 @@ begin
     begin
         ServDoc := SM.Documents(I);
         if (ServDoc.Kind = cDocKind_PcbLib) then
-        if (ServDoc.IsShown = bLongTrue) then
+        if (ServDoc.IsShown = cLongTrue) then
         begin
             CurrentServDoc := ServDoc;
             APCB := PCBServer.GetCurrentPCBLibrary;
