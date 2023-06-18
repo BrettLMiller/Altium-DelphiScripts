@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230617   0.27
+ 20230618   0.28
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);
@@ -74,8 +74,7 @@ begin
         PanPCBForm.editboxSelectRow.Text  := TBoxText;
     end;
 
-    PanOtherPCBDocs(1);
-    PanOtherPcbLibs(1);
+    PanProcessAll(1);
 end;
 
 procedure TPanPCBForm.cbOriginModeChange(Sender: TObject);
