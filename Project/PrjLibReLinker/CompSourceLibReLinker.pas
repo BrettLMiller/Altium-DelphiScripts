@@ -30,6 +30,7 @@ by adding to a common script project.
 30/06/2020  0.15 Added DMObjects workaround for broken ISch_Implementation in AD19+
 01/07/2020  0.16 convert version major to int value to test.
 13/08/2020  0.17 Always tick the Comp prop. Library box.
+2023-06-20  0.18 Wipe Vault GUIDs if CMP or FP found in local Project.
 
 DBLib:
     Component is defined in the table.
@@ -284,8 +285,11 @@ begin
             FoundLibName := ExtractFilename(DataFileLoc);
             if not Found then inc(FLinkCount);
 
-            if Found then Result := true;
-
+            if Found then
+            begin
+                Result := true;
+                Component.SetState_VaultGUID('');
+            end;
             if Fix and Found then
             begin
                 Component.SourceFootprintLibrary := FoundLibName;
@@ -389,6 +393,7 @@ Begin
 
             if SchLibDoc.ObjectID = eSchLib then
             begin
+                Component.SetState_VaultGUID('');
                 Component.SetState_SourceLibraryName(ExtractFilename(SchLibDoc.DocumentName));
                 // fix components extracted from dBlib into SchLib/IntLib with problems..
                 //Component.DatabaseLibraryName := '';
@@ -440,8 +445,11 @@ Begin
                 if not Found then Inc(SLinkCount);
 
 // any found part is success!
-                if Found then Result := true;
-
+                if Found then
+                begin
+                    Result := true;
+                    Component.SetState_VaultGUID('');
+                end;
                 if Fix & (Found) Then
                 begin
                     Report.Add    ('   Library Path    : ' + Component.LibraryPath);
@@ -495,6 +503,8 @@ Begin
 
                     FoundLibName := ExtractFilename(TopLevelLoc);
                     if not Found then Inc(FLinkCount);
+                    if Found then
+                        SchImpl.SetState_ModelVaultGUID('');
 
                     if Fix and Found then
                     begin
