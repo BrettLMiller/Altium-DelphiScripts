@@ -31,6 +31,13 @@ var
     cbAnyLibPath     : TCheckBox;
     XPDirectoryEdit1 : TXPDirectoryEdit;
 
+
+function ShowForm(dummy : integer) : boolean;
+begin
+    PanPCBForm.FormStyle := fsStayOnTop;
+    PanPCBForm.Show;
+end;
+
 procedure TPanPCBForm.PanPCBFormShow(Sender: TObject);
 begin
     PanPCBForm.cbOriginMode.Items.AddStrings(slBoardRef);

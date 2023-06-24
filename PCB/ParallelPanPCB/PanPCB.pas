@@ -8,7 +8,7 @@ Pans to selected component in open PcbLibs
 Can open PcbLib using Component footprint name & library
 
 Strict Library Match  : PcbLib filename must match Footprint source library
-Allow Open            : allow opening any PcbLib with filename match in Workspace.
+Allow Open            : allow opening any PcbLib (inc DBLib) with filename match in Workspace.
 Any Path              : find a copy of PcbLib anywhere Workspace or in a folder branch .
 
 Set to 1sec refresh.
@@ -31,9 +31,12 @@ Author BL Miller
 20230616   0.26 refactor: split processes, move out of form code.
 20230617   0.27 open PcbLibs & focus select footprint model
 20230618   0.28 bug in SearchPath & test before Client.OpenDoc as can create file!
+20230622   0.29 support project searchpath (partially).
+20230625   0.30 support load source PcbLib from DBLib, deselect FP after open PcbLib.
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
+honour the enabled/disabled install lib status.
 
 SetState_CurrentLayer does not exist, & .CurrentLayer appears to fail to set other PcbDocs.
 }
@@ -44,6 +47,7 @@ const
     cPcbDoc = 1;
     cPcbLib = 2;
     cInitSearchPath = 'c:\Altium';
+    cIgnoreLibName = 'Simulation';
 
 function FocusedPCB(dummy : integer) : boolean;             forward;
 function FocusedLib(dummy : integer) : boolean;             forward;
@@ -53,12 +57,16 @@ function AllPcbLibs(dummy : integer) : TStringList;         forward;
 function PanOtherPCBDocs(dummy : integer) : boolean;        forward;
 function PanOtherPcbLibs(dummy : integer) : boolean;        forward;
 function OpenPcbLibs(dummy : integer) : boolean;            forward;
-function GetLoadPcbLibByPath(LibPath : Widestring, const Load : boolean) : IPCB_Library; forward;
-function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;        forward;
+function GetLoadPcbLibByPath(LibPath : Widestring, const Load : boolean) : IPCB_Library;  forward;
+function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;         forward;
+function FindAllOtherPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument; forward;
+function PrjSearchPaths(Prj : IProject, FileName : WideString) : TStringlist;             forward;
+function FindInstallLibraryPath(LibName : WideString, LibKind : TLibKind) : WideString;   forward;
+Function LibraryType (LibPath : WideString) : ILibraryType; forward;
 function GetViewRect(APCB : IPCB_Board) : TCoordRect;       forward;
-function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect;    forward;
+function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect;     forward;
 function IsFlipped(dummy : integer) : boolean;              forward;
-function FindLayerObj(ABrd : IPCB_Board, Layer : TLayer) : IPCB_LayerObject;             forward;
+function FindLayerObj(ABrd : IPCB_Board, Layer : TLayer) : IPCB_LayerObject;              forward;
 function ClearBoardSelections(ABrd : IPCB_Board) : boolean; forward;
 
 var
@@ -77,6 +85,7 @@ var
     bExactLibName  : boolean;
     bOpenLibs      : boolean;
     bAnyLibPath    : boolean;
+    bDeselectFP    : boolean;
     SearchPath     : Widestring;
 
 procedure PanPCBs;
@@ -94,18 +103,17 @@ begin
     bOpenLibs     := false;
     bAnyLibPath   := false;
     SearchPath    := cInitSearchPath;
-    CurrentPCB := nil;
-    CurrentLib := nil;
-    CurrentCMP := nil;
-    CurrentPLC := nil;
-    bSameScale := false;
-    bCenterCMP := true;
-    iBoardRef  := 0;
+    CurrentPCB    := nil;
+    CurrentLib    := nil;
+    CurrentCMP    := nil;
+    CurrentPLC    := nil;
+    bSameScale    := false;
+    bCenterCMP    := true;
+    bDeselectFP   := false;
+    iBoardRef     := 0;
 
     RefreshFocus(1);
-
-    PanPCBForm.FormStyle := fsStayOnTop;
-    PanPCBForm.Show;
+    ShowForm(1);
 end;
 
 function PanProcessAll(dummy : integer) : boolean;
@@ -165,18 +173,21 @@ begin
         if Prim.InComponent then CurrentCMP := Prim.Component;
     end;
 
-        CLayer   := CurrentPCB.GetState_CurrentLayer;
-        IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
+    if bDeselectFP then
+    if CurrentCMP <> nil then CurrentCMP.Selected := false;
+
+    CLayer   := CurrentPCB.GetState_CurrentLayer;
+    IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
 
     if IsMLayer then
     begin
-            LayerStack := CurrentPCB.LayerStack_V7;
-            MechLayer := LayerStack.LayerObject_V7[CLayer];
-            SLayerMode := MechLayer.DisplayInSingleLayerMode;
+        LayerStack := CurrentPCB.LayerStack_V7;
+        MechLayer := LayerStack.LayerObject_V7[CLayer];
+        SLayerMode := MechLayer.DisplayInSingleLayerMode;
     end;
 
-        CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
-        bView3D := CGV.Is3D;
+     CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
+     bView3D := CGV.Is3D;
 
     for I := 0 to (BrdList.Count -1 ) do
     begin
@@ -204,6 +215,7 @@ begin
                 end;
             end;
 
+// changes the physical window size!
             CGV  := OBrd.GetState_MainGraphicalView;
 
             if not IsMLayer then
@@ -225,6 +237,7 @@ begin
             end;
 
 //            CGV.SetIs3D(bView3D);                    // partially works
+//            OBrd.ViewConfigIs3D;                       // read only
 
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
@@ -299,42 +312,70 @@ end;
 function OpenPcbLibs(dummy : integer) : boolean;
 var
     Prj         : IProject;
-    PrjDoc      : IDocument;
+    LibDoc      : IDocument;
     ServDoc     : IServerDocument;
     OLib        : IPCB_Library;
     LibFileName : WideString;
     LibPath     : Widestring;
+    FPLibPath   : Widestring;
     FoundPath   : WideString;
+    slFileList  : TStringlist;
+    SearchPath  : WideString;
     bFound      : boolean;
 begin
     If CurrentCMP = nil then exit;
     if not bOpenLibs then exit;
 
-    bFound := false;
-    PrjDoc    := nil;
-    ServDoc   := nil;
-    FoundPath := SearchPath;
+    bDeselectFP := true;
+    bFound      := false;
+    LibPath     := '';
+    LibDoc      := nil;
+    ServDoc     := nil;
+    slFileList  := TStringList.Create;
+    FoundPath   := SearchPath;
     LibFileName := ExtractFileName(CurrentCMP.SourceFootprintLibrary);
-    LibPath     := ExtractFilePath(CurrentCMP.SourceFootprintLibrary);
+    FPLibPath   := ExtractFilePath(CurrentCMP.SourceFootprintLibrary);
 // PCBLib not opened
+// this focused project
     Prj := GetWorkspace.DM_FocusedProject;
     if Prj <> nil then
-        PrjDoc := FindPrjDocByFileName(Prj, LibFileName);
+    begin
+        LibDoc := FindPrjDocByFileName(Prj, LibFileName);
+        if LibDoc <> nil then
+            LibPath := LibDoc.DM_FullPath
+        else
+            slFileList :=  PrjSearchPaths(Prj, LibFileName);
+        if slFileList.Count > 0 then LibPath := slFileList.Strings(0);
+    end;
 
-    if PrjDoc = nil then
+// all other projects
+    if LibPath = '' then
+    begin
+        LibDoc := FindAllOtherPrjDocByFileName(Prj, LibFileName);
+        if LibDoc <> nil then
+            LibPath := LibDoc.DM_FullPath;
+    end;
+
+// free project
+    if LibPath = '' then
     begin
         Prj := GetWorkspace.DM_FreeDocumentsProject;
         if Prj <> nil then
-            PrjDoc := FindPrjDocByFileName(Prj, LibFileName);
+            LibDoc := FindPrjDocByFileName(Prj, LibFileName);
+        if LibDoc <> nil then
+            LibPath := LibDoc.DM_FullPath
     end;
-    if PrjDoc <> nil then
-        ServDoc := Client.OpenDocumentShowOrHide(cDocKind_PcbLib, PrjDoc.DM_FullPath, True);
+
+// installed libs
+    if LibPath = '' then
+        LibPath := FindInstallLibraryPath(LibFileName, eLibSrc_File);
+
+    if (LibPath <> '') then
+        ServDoc := Client.OpenDocumentShowOrHide(cDocKind_PcbLib, LibPath, True);
 
     if (ServDoc = nil) then
     begin
-        Prj := GetWorkspace.DM_FreeDocumentsProject;
-        Prj.DM_BeginUpdate;
-        FoundPath := LibPath;
+        FoundPath := FPLibPath;
         bFound := FindFileInFolderBranch(LibFileName, FoundPath, SearchPath);
 
         if not bFound then
@@ -346,8 +387,12 @@ begin
         if bFound and (FoundPath <> '') then
             ServDoc := Client.OpenDocumentShowOrHide(cDocKind_PcbLib, FoundPath, True);
         if (ServDoc <> nil) then
+        begin
+            Prj := GetWorkspace.DM_FreeDocumentsProject;
+            Prj.DM_BeginUpdate;
             Prj.DM_AddSourceDocument(ServDoc.FileName);
-        Prj.DM_EndUpdate;
+            Prj.DM_EndUpdate;
+        end;
     end;
 
     if (ServDoc <> nil) then
@@ -355,8 +400,11 @@ begin
         OLib := GetLoadPcbLibByPath(ServDoc.FileName, true);
         if OLib <> nil then Result := true;
         Client.ShowDocument(ServDoc);
+//        ServDoc.View(0).Show;
         Servdoc.Focus;
     end;
+    slFileList.Clear;
+    slFileList.Free;
     Prj.DM_RefreshInWorkspaceForm;
 end;
 
@@ -366,6 +414,61 @@ begin
     if Load then
     if Result = nil then
         Result := PcbServer.LoadPcbBoardByPath(LibPath);
+end;
+
+function PrjSearchPaths(Prj : IProject, FileName : WideString) : TStringlist;
+var
+    SearchPath  : ISearchPath;
+    LibPath     : WideString;
+    FilePaths   : TStrings;
+    I           : integer;
+    bSubFolders : boolean;
+begin
+    Result    := TStringList.Create;
+    FilePaths := TStringList.Create;
+    for I := 0 to (Prj.DM_SearchPathCount - 1) do
+    begin
+        SearchPath := Prj.DM_SearchPaths(I);
+        LibPath   := ExtractFilepath(Searchpath.DM_AbsolutePath);   // comes with file mask *.*
+        bSubFolders := SearchPath.DM_IncludeSubFolders;
+        FindFiles(LibPath, FileName, faAnyFile, bSubFolders, FilePaths);
+        if (FilePaths.Count > 0) then
+            Result.Add(FilePaths.Strings(0));
+    end;
+    FilePaths.Clear;
+    FilePaths.Free;
+end;
+
+function FindInstallLibraryPath(LibName : WideString, LibKind : TLibKind) : WideString;
+var
+    IntLibMan   : IIntegratedLibraryManager;
+    DBLib       : IDatabaseLibDocument;
+    DBSourceLib : WideString;
+    FilePath    : WideString;
+    I           : integer;
+begin
+    Result := '';
+    IntLibMan := IntegratedLibraryManager;
+    If IntLibMan = Nil Then Exit;
+    for I := 0 to (IntLibMan.InstalledLibraryCount - 1) Do
+    begin
+        FilePath  := IntLibMan.InstalledLibraryPath(I);
+
+        if ansipos(cIgnoreLibName, ExtractFileNameFromPath(FilePath)) = 1 then
+            continue;
+
+        if ExtractFileName(FilePath) <> LibName then continue;
+
+        if LibraryType(FilePath) = LibKind then
+            Result := FilePath;
+
+        if LibraryType(FilePath) = eLibDatabase then
+        begin
+            DBSourceLib := '';
+            Result := IntLibMan.GetDatabaseModelFullLibPath(FilePath, DBSourceLib, CurrentCMP.Pattern, cDocKind_PcbLib);
+        end;
+        if Result <> '' then break;
+    end;
 end;
 
 // FindProjectDocumentByFileName() needs fullpath.
@@ -386,6 +489,45 @@ begin
         end;
     end;
 end;
+
+function FindAllOtherPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;
+var
+    WS     : IWorkspace;
+    OPrj   : IProject;
+    LibDoc : IDocument;
+    I      : integer;
+begin
+    Result := nil;
+    WS := GetWorkspace;
+    for I := 0 to (WS.DM_ProjectCount - 1) do
+    begin
+        OPrj := WS.DM_Projects(I);
+        if OPrj = Prj then continue;
+        LibDoc := FindPrjDocByFileName(OPrj, FileName);
+        if LibDoc <> nil then
+            Result := LibDoc;
+    end;
+end;
+
+Function LibraryType (LibPath : WideString) : ILibraryType;
+// LibPath is the full path & name.
+var
+    IntLibMan   : IIntegratedLibraryManager;
+    I        : Integer;
+    LibCount : Integer;
+
+begin
+    Result := -1;
+    IntLibMan := IntegratedLibraryManager;
+    LibCount := IntLibMan.AvailableLibraryCount;   // zero based totals !
+
+    for I := 0 to (LibCount - 1) Do           //.Available...  <--> .Installed...
+    Begin
+        if IntLibMan.AvailableLibraryPath(I) = LibPath then
+            Result := IntLibMan.AvailableLibraryType(I);
+        if Result <> -1 then break;
+    end;
+End;
 
 function GetCurrentFPName(dummy : integer) : widestring;
 begin
@@ -471,6 +613,8 @@ var
    CBO : TCoordRect;
    OBBOR : TCoordRect;
    CBBOR : TCoordRect;
+
+//   OWR : TCoordRect;
 begin
     OBBOR := OPCB.BoardOutline.BoundingRectangle;
     CBBOR := CPCB.BoardOutline.BoundingRectangle;
