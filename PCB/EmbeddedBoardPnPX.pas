@@ -17,8 +17,8 @@
 20220606  0.16 region location error if board shape was convex: use bounding box calc. move.
 20220701  0.17 separate text from regionshape fn & layer.
 20221028  0.18 use RouteToolpath & MechLayerKind
-20221217  0.19 later AD 21-22 does not like to pass EMB.ChildBoard object.
-
+20221217  0.19 later AD 21-22 does not like to pass IPCB_ChildBoard object.
+20230626  0.20 forgot to report mirrored
 
 Child board-outline bounding rect is used to align to EMB origin
 AD17 Outjob placement file for any mirrored EMB is wrong!
@@ -26,9 +26,9 @@ AD17 Outjob placement file for any mirrored EMB is wrong!
 }
 const
 // mechanical layers
-   cOutlineLayer  = 21;    // destination outlines
-   cRegShapeLayer = 23;    // destination region shapes
-   cTextLayer     = 22;    // destination text labels
+   cOutlineLayer  = 41;    // destination outlines
+   cRegShapeLayer = 43;    // destination region shapes
+   cTextLayer     = 42;    // destination text labels
 // make keepouts source layer
    cMLKRouteToolPath = 28;    // for old vers that do not have builtin const for layerkind 'Route Tool Path'
    cRouteNPLayer     = 11;    // fall-back source NTP routing profile if no Kind found
@@ -63,12 +63,13 @@ function DrawOutlines(EMB : IPCB_EmbeddedBoard, const Layer : TLayer, UIndex : i
 function DrawBORegions(EMB : IPCB_EmbeddedBoard, Layer : TLayer, RegKind : TRegionKind, const UIndex : integer) : TObjectList; forward;
 function ReportOnEmbeddedBoard (EMB : IPCB_EmbeddedBoard, Var RowCnt : integer, Var ColCnt : integer) : boolean;               forward;
 function AddText(NewText : WideString; Location : TLocation, Layer : TLayer, UIndex : integer) : IPCB_Text;                    forward;
-function AddKeepouts(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;        forward;
+function AddPrims(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;        forward;
 function SetPrimsAsKeepouts(PL : TObjectList, const Layer : TLayer) : boolean;                                                 forward;
 function MakeRegionFromPolySegList (PLBO : IPCB_BoardOutline, const Layer : TLayer, const RegKind : TRegionKind, Add : boolean) : IPCB_Region; forward;
-function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;                      forward;
-function GetChildBoardObjs(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet ) : TObjectList; forward;
-function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;                  forward;
+function MaxBR(SBR : TCoordRect, TBR : TCoordRect) : TCoordRect;                                              forward;
+function GetChildBoardObjs(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, LayerSet : IPCB_LayerSet) : TObjectList;  forward;
+function GetChildBoardObjsL(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, Layer : TLayer) : TObjectList;           forward;
+function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;                                          forward;
 function RestoreEmbeddedBoard (EMB : IPCB_EmbeddedBoard, RowCnt : integer, ColCnt : integer) : boolean;       forward;
 function GetEmbeddedBoards(ABoard : IPCB_Board) : TObjectList;                        forward;
 function Version(const dummy : boolean) : TStringList;                                forward;
@@ -308,12 +309,97 @@ begin
     Report.Free;
 end;
 
+procedure AddPasteToEmbdBrdObjs;
+var
+    EmbeddedBoardList : TObjectList;
+    EMB               : IPCB_EmbeddedBoard;
+    CB                : IPCB_Board;
+    KORegList         : TObjectList;
+    RegKind           : TRegionKind;
+    KOText            : TStringList;
+    KOList            : TObjectList;
+    Layer             : TLayer;
+    OSet              : TObjectSet;
+    Layers            : IPCB_LayerSet;
+    I                 : integer;
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then
+    Begin
+        ShowWarning('This document is not a PCB document!');
+        Exit;
+    End;
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);
+
+// returns TUnits but with swapped meanings AD17 0 == Metric but API has eMetric=1 & eImperial=0
+    BUnits := Board.DisplayUnit;
+    GetCurrentDocumentUnit;
+    if (BUnits = eImperial) then BUnits := eMetric
+    else BUnits := eImperial;
+
+    VerMajor := Version(true).Strings(0);
+
+    MaxMechLayers := AD17MaxMechLayers;
+    LegacyMLS     := true;
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    begin
+        LegacyMLS     := false;
+        MaxMechLayers := AD19MaxMechLayers;
+    end;
+
+    Report := TStringList.Create;
+
+    EmbeddedBoardList := GetEmbeddedBoards(Board);
+
+    for I := 0 to (EmbeddedBoardList.Count - 1) do
+    begin
+        EMB := EmbeddedBoardList.Items(I);
+        CB  := EMB.ChildBoard;
+        Layer := eTopPaste;  //  CB.RouteToolPathLayer;
+
+        Layers := LayerSetUtils.EmptySet;
+        Layers.Include(Layer);
+        Layers.Include(eTopLayer);
+        LayerUtils.FromString('Top Paste');
+        Layers.ToString;
+
+        OSet   := MkSet(ePadObject, eRegionObject, eTrackObject, eArcObject);
+
+        KOList := GetChildBoardObjs(EMB, OSet, Layers);
+
+
+
+        Layer   := eTopPaste;
+        RegKind := eRegionKind_Copper;
+        AddPrims(EMB, KOList, Layer, 0);
+//        KORegList := DrawBORegions(EMB, Layer, RegKind, 0);
+//        SetPrimsAsKeepouts(KORegList, Layer);
+    end;
+
+    Client.SendMessage('PCB:Zoom', 'Action = Redraw', 256, Client.CurrentView);
+    Board.ViewManager_FullUpdate;
+// more required AD21.9
+    Board.ViewManager_UpdateLayerTabs;
+// is this enough to replace above ?
+    PcbServer.RefreshDocumentView(Board.FileName);
+
+    EmbeddedBoardList.Destroy;   // does NOT own the objects !!
+
+//    Report.Add(' KOs       : ' + IntToStr(Board.GetPrimitiveCounter.GetObjectCount(ePadObject)));
+
+    FileName := GetWorkSpace.DM_FocusedDocument.DM_FullPath;
+    FileName := ExtractFilePath(FileName) + '\AddPasteEmbBrd.txt';
+    Report.SaveToFile(FileName);
+    Report.Free;
+end;
+
 procedure AddKeepOutsToEmbdBrdObjs;
 var
     EmbeddedBoardList : TObjectList;
     EMB               : IPCB_EmbeddedBoard;
     CB                : IPCB_Board;
     KORegList         : TObjectList;
+    NewKOList         : TObjectList;
     RegKind           : TRegionKind;
     KOText            : TStringList;
     KOList            : TObjectList;
@@ -369,7 +455,10 @@ begin
 
         Layer   := eKeepOutLayer;
         RegKind := eRegionKind_Copper;
-        AddKeepOuts(EMB, KOList, Layer, 0);
+        NewKOList := AddPrims(EMB, KOList, Layer, 0);
+
+        SetPrimsAsKeepouts(NewKOList, Layer);
+
         KORegList := DrawBORegions(EMB, Layer, RegKind, 0);
         SetPrimsAsKeepouts(KORegList, Layer);
     end;
@@ -536,13 +625,15 @@ begin
     end;
 end;
 
-function DrawKeepout(KOL : TObjectList, CBO : TCoordPoint, RefP : TCoordPoint, Rotation : double, Mirror : boolean, const Layer : TLayer, UIndex : integer) : TObjectList;
+function DrawPrims(KOL : TObjectList, CBO : TCoordPoint, RefP : TCoordPoint, Rotation : double, Mirror : boolean, const Layer : TLayer, UIndex : integer) : TObjectList;
 var
     Prim     : IPCB_Primitive;
     I        : Integer;
     X, Y     : TCoord;
     Track    : IPCB_Track;
     Arc      : IPCB_Arc;
+    Region   : IPCB_Region;
+    Pad      : IPCB_Pad;
 begin
     Result := TObjectList.Create;
     Result.OwnsObjects := false;
@@ -554,10 +645,12 @@ begin
         if Prim.ObjectId = eTrackObject then
         begin
             Track := Prim.Replicate;
+            Track.SetState_PasteMaskExpansionMode(eMaskExpansionMode_NoMask);
+            Track.SetState_SolderMaskExpansionMode(eMaskExpansionMode_NoMask);
             Track.Layer := Layer;
+            Track.UnionIndex := UIndex;
     //   move, mirror, rotate
             Track.MoveByXY(RefP.X - CBO.X, RefP.Y - CBO.Y);
-            Track.UnionIndex := UIndex;
 
             if (Mirror) then
                 Track.Mirror(RefP.X, eHMirror);
@@ -576,11 +669,13 @@ begin
         if Prim.ObjectId = eArcObject then
         begin
             Arc := Prim.Replicate;
+            Arc.SetState_PasteMaskExpansionMode(eMaskExpansionMode_NoMask);
+            Arc.SetState_SolderMaskExpansionMode(eMaskExpansionMode_NoMask);
             Arc.Layer := Layer;
+            Arc.UnionIndex := UIndex;      // no point in PcbLib.
 
             Arc.MoveByXY(RefP.X - CBO.X, RefP.Y - CBO.Y);
 
-            Arc.UnionIndex := UIndex;      // no point in PcbLib.
 
             if (Mirror) then
                 Arc.Mirror(RefP.X, eHMirror);
@@ -592,10 +687,52 @@ begin
             PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
             Result.Add(Arc);
         end;
+        if Prim.ObjectId = eRegionObject then
+        begin
+            Region := Prim.Replicate;
+            Region.SetState_PasteMaskExpansionMode(eMaskExpansionMode_NoMask);
+            Region.SetState_SolderMaskExpansionMode(eMaskExpansionMode_NoMask);
+            Region.Layer := Layer;
+            Region.UnionIndex := UIndex;
+
+            // Region.MoveToXY(EMBO.X, EMBO.Y);   // off target for boards with convex shapes!
+            Region.MoveByXY(RefP.X - CBO.X, RefP.Y - CBO.Y);
+
+            if (Mirror) then
+                Region.Mirror(RefP.X, eHMirror);    // EMB.X   BOBR.X1
+
+            Region.RotateAroundXY(RefP.X, RefP.Y, Rotation);
+
+            Board.AddPCBObject(Region);
+            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Region.I_ObjectAddress);
+            Result.Add(Region);
+        end;
+        if Prim.ObjectId = ePadObject then
+        begin
+            Pad := Prim.Replicate;
+            Pad.Moveable := true;
+            Pad.SetState_PasteMaskExpansionMode(eMaskExpansionMode_NoMask);
+            Pad.SetState_SolderMaskExpansionMode(eMaskExpansionMode_NoMask);
+
+            Pad.Layer := Layer;
+            Pad.UnionIndex := UIndex;
+
+            // Region.MoveToXY(EMBO.X, EMBO.Y);   // off target for boards with convex shapes!
+            Pad.MoveByXY(RefP.X - CBO.X, RefP.Y - CBO.Y);
+
+            if (Mirror) then
+                Pad.Mirror(RefP.X, eHMirror);    // EMB.X   BOBR.X1
+
+            Pad.RotateAroundXY(RefP.X, RefP.Y, Rotation);
+
+            Board.AddPCBObject(Pad);
+            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+            Result.Add(Pad);
+        end;
     end;
 end;
 
-function AddKeepouts(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : boolean;
+function AddPrims(EMB : IPCB_EmbeddedBoard, KOList : TObjectList, const Layer : TLayer, UIndex : integer) : TObjectList;
 var
     CB        : IPCB_Board;
     PLBO      : IPCB_BoardOutline;
@@ -608,8 +745,12 @@ var
     RI, CI    : integer;
     RS, CS    : TCoord;
     RM, CM    : TCoord;
+    i         : integer;
 
 begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
+
     CB   := EMB.ChildBoard;
     PLBO := CB.BoardOutline;
     CBBR := PLBO.BoundingRectangle;
@@ -644,10 +785,12 @@ begin
 //  origin of each individual piece.
             EMBO := Point(EMB.XLocation + CI * CS, EMB.YLocation + RI * RS);
 
-            NewKOList := DrawKeepout(KOList, CBO, EMBO, EMB.Rotation, EMB.MirrorFlag, Layer, UIndex);
-            SetPrimsAsKeepouts(NewKOList, Layer);
+            NewKOList := DrawPrims(KOList, CBO, EMBO, EMB.Rotation, EMB.MirrorFlag, Layer, UIndex);
+            for i := 0 to (NewKOList.Count - 1) do
+                Result.Add( NewKOList.Items(i) );
         end;
 
+    NewKOList.Destroy;
     PCBServer.PostProcess;
 end;
 
@@ -1015,7 +1158,7 @@ begin
     Report.Add('Origin (X,Y) : (' + CoordUnitToString(EMB.XLocation - BOrigin.X ,eMM) + ',' + CoordUnitToString(EMB.YLocation - BOrigin.Y ,eMM) + ')' );
     Report.Add('X1    : ' + CoordUnitToString(BR.X1 - BOrigin.X ,eMM) + ' Y1: '  + CoordUnitToString(BR.Y1 - BOrigin.Y, eMM) +
               ' X2    : ' + CoordUnitToString(BR.X2 - BOrigin.X ,eMM) + ' Y2: '  + CoordUnitToString(BR.Y2 - BOrigin.Y, eMM) );
-    Report.Add('Layer : ' + IntToStr(EMB.Layer) + '   Rotation: '   + FloatToStr(EMB.Rotation));
+    Report.Add('Layer : ' + IntToStr(EMB.Layer) + '   Rotation: '   + FloatToStr(EMB.Rotation) + '  Mirrored: ' + BoolToStr(EMB.MirrorFlag, true) );
     Report.Add('RowCnt: ' + IntToStr(RowCnt)    + '   ColCnt: '     + IntToStr(ColCnt));
     Report.Add('RowSpc: ' + CoordUnitToString(EMB.RowSpacing, eMM)         + '   ColSpc: ' + CoordUnitToString(EMB.ColSpacing, eMM)+
             '   RowMar: ' + CoordUnitToString(EMB.GetState_RowMargin, eMM) + '   ColMar: ' + CoordUnitToString(EMB.GetState_ColMargin, eMM) );
@@ -1092,6 +1235,47 @@ begin
     CBoard.BoardIterator_Destroy(BIterator);
 end;
 
+function GetChildBoardObjMasks(EMB : IPCB_EmbeddedBoard, ObjSet : TSet, Layer : TLayer) : TObjectList;
+var
+    CBoard    : IPCB_Board;
+    BIterator : IPCB_BoardIterator;
+    Prim      : IPCB_Primitive;
+
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
+
+    CBoard := EMB.ChildBoard;
+
+    BIterator := CBoard.BoardIterator_Create;
+    BIterator.AddFilter_ObjectSet(ObjSet);
+    BIterator.AddFilter_LayerSet(MkSet(Layer));
+    BIterator.AddFilter_Method(eProcessAll);
+
+    Prim := BIterator.FirstPCBObject;
+    while (Prim <> Nil) do
+    begin
+        MaskEnabled := false;
+        MaskMode := Prim.GetState_PasteMaskExpansionMode;
+        if (MaskMode <> eMaskExpansionMode_NoMask) then MaskEnabled := true;
+
+        if MaskEnabled and ((Prim.Layer = eTopLayer) or (Prim.Layer = eBottomLayer)) then
+        begin
+            if Prim.ObjectId = eRegionObject then
+            begin
+                if (Prim.Kind = eRegionKind_Copper) then
+                    Result.Add(Prim);
+            end
+            else Result.Add(Prim);
+        end;
+        if ((Prim.Layer = eTopPaste) or (Prim.Layer = eBottomPaste)) then
+            Result.Add(Prim);
+
+        Prim := BIterator.NextPCBObject;
+    end;
+    CBoard.BoardIterator_Destroy(BIterator);
+end;
+
 function CollapseEmbeddedBoard (EMB : IPCB_EmbeddedBoard) : boolean;
 begin
     EMB.Setstate_RowCount(1);
@@ -1160,3 +1344,4 @@ begin
             Result := ML1;
     end;
 end;
+
