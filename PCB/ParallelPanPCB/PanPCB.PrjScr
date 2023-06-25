@@ -74,11 +74,11 @@ DocumentUniqueId=
 
 [Parameter1]
 Name=VersionForm
-Value=0.30
+Value=0.27
 
 [Parameter2]
 Name=VersionCode
-Value=0.30
+Value=0.31
 
 [Parameter3]
 Name=RevisionDate
@@ -101,5 +101,4 @@ Value=BL Miller
 
 [Generic_ScriptingSystem]
 StartProcName=PanPCB.pas>PanPCBs
-
 

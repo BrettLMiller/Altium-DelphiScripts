@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230618   0.28
+ 20230623   0.31 (form 0.27)
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);

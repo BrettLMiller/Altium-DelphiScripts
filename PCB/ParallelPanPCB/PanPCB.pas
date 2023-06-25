@@ -33,6 +33,7 @@ Author BL Miller
 20230618   0.28 bug in SearchPath & test before Client.OpenDoc as can create file!
 20230622   0.29 support project searchpath (partially).
 20230625   0.30 support load source PcbLib from DBLib, deselect FP after open PcbLib.
+20230623   0.31 check if DBLib sourcelib already open.
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
@@ -186,8 +187,8 @@ begin
         SLayerMode := MechLayer.DisplayInSingleLayerMode;
     end;
 
-     CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
-     bView3D := CGV.Is3D;
+    CGV  := CurrentPCB.GetState_MainGraphicalView;     // TPCBView_DirectX()
+    bView3D := CGV.Is3D;
 
     for I := 0 to (BrdList.Count -1 ) do
     begin
@@ -237,7 +238,6 @@ begin
             end;
 
 //            CGV.SetIs3D(bView3D);                    // partially works
-//            OBrd.ViewConfigIs3D;                       // read only
 
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
@@ -271,6 +271,7 @@ var
     ServDoc    : IServerDocument;
     OLib       : IPCB_Library;
     LibCMP     : IPCB_LibComponent;
+    SLibName   : WideString;
     LCMPName   : Widestring;
     I          : integer;
 begin
@@ -282,8 +283,17 @@ begin
     begin
         LCMPName := '';
         ServDoc  := PcbLibList.Objects(I);
+        SLibName := ExtractFileName(CurrentCMP.SourceFootprintLibrary);
+
+// indirect to sourcelib
+        if LibraryType(SLibName) = eLibDatabase then
+        begin
+            SLibName := FindInstallLibraryPath(SLibName, eLibDatabase);
+            SLibName := ExtractFileName(SLibName);
+        end;
+
         if bExactLibName then
-        if ExtractFileName(CurrentCMP.SourceFootprintLibrary) <> ExtractFileName(ServDoc.FileName) then
+        if SLibName <> ExtractFileName(ServDoc.FileName) then
             continue;
 
 // this should have been handled by OpenPcbLib?
@@ -400,7 +410,6 @@ begin
         OLib := GetLoadPcbLibByPath(ServDoc.FileName, true);
         if OLib <> nil then Result := true;
         Client.ShowDocument(ServDoc);
-//        ServDoc.View(0).Show;
         Servdoc.Focus;
     end;
     slFileList.Clear;
@@ -613,8 +622,6 @@ var
    CBO : TCoordRect;
    OBBOR : TCoordRect;
    CBBOR : TCoordRect;
-
-//   OWR : TCoordRect;
 begin
     OBBOR := OPCB.BoardOutline.BoundingRectangle;
     CBBOR := CPCB.BoardOutline.BoundingRectangle;
