@@ -16,6 +16,7 @@ B. Miller
 27/09/2019 : Add NetAntennae Rules check
 24/10/2019 : Add 100 Coord to Via size; Message text change
 14/06/2020 : Fix iterator LayerSet filter
+2023-06-30 : Use DefinitionLayerIterator interface
 
 Extra proc CleanViolations()  just in case clean up needed at some point..
 }
@@ -119,25 +120,26 @@ end;
 
 procedure SelectViaAntennas;
 var
-   Iter          : IPCB_BoardIterator;
-   SpIter        : IPCB_SpatialIterator;
-   Via           : IPCB_Via;
-   Violation     : IPCB_Violation;
-   Prim          : IPCB_Primitive;
-   LayerStack    : IPCB_LayerStack;
-   LayerObj      : IPCB_LayerObject;
-   PLayerSet     : IPCB_LayerSet;
-   Layer         : TLayer;
-   Rectangle     : TCoordRect;
-   Rule          : IPCB_Rule;
-   Rule2         : IPCB_Rule;
-   RulesList     : TObjectList;
-   Connection    : Integer;
-   ViolCount     : integer;
-   S, VersionStr : String;
-   MajorADVersion : Integer;
-   found          : Boolean;
-   R              : integer;
+    Iter           : IPCB_BoardIterator;
+    SpIter         : IPCB_SpatialIterator;
+    VLI            : IPCB_LayerIterator;
+    Via            : IPCB_Via;
+    Violation      : IPCB_Violation;
+    Prim           : IPCB_Primitive;
+    LayerStack     : IPCB_LayerStack;
+    LayerObj       : IPCB_LayerObject;
+    PLayerSet      : IPCB_LayerSet;
+    Layer          : TLayer;
+    Rectangle      : TCoordRect;
+    Rule           : IPCB_Rule;
+    Rule2          : IPCB_Rule;
+    RulesList      : TObjectList;
+    Connection     : Integer;
+    ViolCount      : integer;
+    S, VersionStr  : String;
+    MajorADVersion : Integer;
+    found          : Boolean;
+    R              : integer;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -188,47 +190,48 @@ begin
 
         Rectangle := Via.BoundingRectangle;
 
-        for Layer := Via.LowLayer to Via.HighLayer do
+        VLI := Via.DefinitionLayerIterator;
+        VLI.AddFilter_ElectricalLayers;
+        VLI.SetBeforeFirst;
+        while (VLI.Next) do
         begin
-            LayerObj := LayerStack.LayerObject(Layer);
-            LayerObj.Name;
+            Layer := VLI.Layer;
+            LayerObj := LayerStack.LayerObject_V7(Layer);
+//            LayerObj.Name;
 
-            if LayerObj.IsInLayerStack then
+            if not LayerObj.IsInLayerStack then continue;
+
+            if LayerUtils.IsSignalLayer(Layer) then
             begin
-                if LayerUtils.IsSignalLayer(Layer) then
+                found := false;
+                PLayerSet := LayerSetUtils.EmptySet;
+                PLayerSet.Include(Layer);
+
+                SpIter.AddFilter_Area(Rectangle.Left - 100, Rectangle.Bottom - 100, Rectangle.Right + 100, Rectangle.Top + 100);
+                SpIter.AddFilter_IPCB_LayerSet(PLayerSet);
+
+                Prim := SpIter.FirstPCBObject;
+                while (Prim <> Nil) Do
                 begin
-                    found := false;
-                    PLayerSet := LayerSetUtils.EmptySet;
-                    PLayerSet.Include(Layer);
-
-                    SpIter.AddFilter_Area(Rectangle.Left - 100, Rectangle.Bottom - 100, Rectangle.Right + 100, Rectangle.Top + 100);
-                    SpIter.AddFilter_IPCB_LayerSet(PLayerSet);
-
-                    Prim := SpIter.FirstPCBObject;
-                    while (Prim <> Nil) Do
+                    if (Prim.ObjectID = ePadObject) then
                     begin
-                       if (Prim.ObjectID = ePadObject) then
-                       begin
-                          if Prim.ShapeOnLayer(Layer) then found := true;
-                       end
-                       else
-                           if (Prim.Layer = Layer) then found := true;
+                        if Prim.ShapeOnLayer(Layer) then found := true;
+                    end else
+                        if (Prim.Layer = Layer) then found := true;
 
-//                       ShowMessage('PP distance ' + IntToStr(Board.PrimPrimDistance(Prim, Via)) );
-                       if found then
-                           if Board.PrimPrimDistance(Prim, Via) = 0 then
-                           begin
-                               Inc(Connection);
-                               break;
-                           end;
-
-                       Prim := SpIter.NextPCBObject;
-                    end;
-                end
-                else
-                    if Via.IsConnectedToPlane(Layer) then
+//                   ShowMessage('PP distance ' + IntToStr(Board.PrimPrimDistance(Prim, Via)) );
+                    if found then
+                    if Board.PrimPrimDistance(Prim, Via) = 0 then
+                    begin
                         Inc(Connection);
-            end;
+                        break;
+                    end;
+
+                    Prim := SpIter.NextPCBObject;
+                end;
+            end else
+                if Via.IsConnectedToPlane(Layer) then
+                    Inc(Connection);
         end;
 
         if Connection = 1 then
