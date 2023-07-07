@@ -1,12 +1,13 @@
 { NetViaAntennasDRC.pas
- Summary   If Vias are connected on only one layer, then
-           a DRC Violation is raised.
-           Also runs NetAntennae Rules (rulekind).                                             
-           Creates a special (disabled) via rule to violate. 
-                                                                              
- Created by:    Petar Perisin                                                 
+ Summary   Creates DRC Violations for Via Routing rules if:
+           - Via is connected on only one layer
+           - Via not connected at both ends
+           Also runs NetAntennae Rules (rulekind).
+           Creates a special (disabled) via rules to violate.
+
+ Created by:    Petar Perisin
 ..............................................................................
- Modified by Randy Clemmons                                                   
+ Modified by Randy Clemmons
  Added code to support for AD14
 
 B. Miller
@@ -17,18 +18,25 @@ B. Miller
 24/10/2019 : Add 100 Coord to Via size; Message text change
 14/06/2020 : Fix iterator LayerSet filter
 2023-06-30 : Use DefinitionLayerIterator interface
+2023-07-08 : DefintionLayerIterator is useless; use board layerstack.
+           : Fix broken Planes; has never worked since before AD16.
+           : Add Strict stub via detection
 
 Extra proc CleanViolations()  just in case clean up needed at some point..
 }
 {..............................................................................}
 
 const
-    SpecialRuleName = '__Script-ViaAntennas__';
+    SpecialRuleName1 = '__Script-ViaAntennas__';
+    SpecialRuleName2 = '__Script-ViaAntennaStubs__';
     SpecialRuleKind = eRule_RoutingViaStyle;
     cAllRules       = -1;
 
+    cViaStubStrict = true;
+
 var
-    Board     : IPCB_Board;
+    Board      : IPCB_Board;
+    LayerStack : IPCB_LayerStack_V7;
 
 function GetMatchingRulesFromBoard (const RuleKind : TRuleKind) : TObjectList;
 var
@@ -73,7 +81,7 @@ begin
 end;
 
 // Rule generated to violate!
-function AddSpecialViaRule(const RuleName, const RuleKind : WideString) : IPCB_Rule;
+function AddSpecialViaRule(const RuleName, const RuleKind : WideString, const CText : WideString) : IPCB_Rule;
 begin
     Result := PCBServer.PCBRuleFactory(RuleKind);   //TRuleKind
 //    PCBServer.PreProcess;
@@ -81,7 +89,7 @@ begin
     Result.Name := RuleName;
     Result.Scope1Expression := 'IsVia';
     Result.Scope2Expression := '';
-    Result.Comment          :='Disabled rule placeholder for scripted violations';
+    Result.Comment          := CText;
     Result.MinWidth         := MilsToCoord(200);
     Result.MaxWidth         := MilsToCoord(200);
     Result.MinHoleWidth     := MilsToCoord(100);
@@ -121,25 +129,35 @@ end;
 procedure SelectViaAntennas;
 var
     Iter           : IPCB_BoardIterator;
-    SpIter         : IPCB_SpatialIterator;
-    VLI            : IPCB_LayerIterator;
+    SpatIter       : IPCB_SpatialIterator;
+    PlaneIter      : IPCB_Iterator;
+    SPRGIter       : IPCB_GroupIterator;
     Via            : IPCB_Via;
     Violation      : IPCB_Violation;
     Prim           : IPCB_Primitive;
-    LayerStack     : IPCB_LayerStack;
-    LayerObj       : IPCB_LayerObject;
+    SplitPlane     : IPCB_SplitPlane;
+    SplitPlaneReg  : IPCB_SplitPlaneRegion;
+    LayerObj       : IPCB_LayerObject_V7;
     PLayerSet      : IPCB_LayerSet;
     Layer          : TLayer;
+    TV7_Layer      : IPCB_TV7_Layer;
     Rectangle      : TCoordRect;
-    Rule           : IPCB_Rule;
+    Rule1          : IPCB_Rule;
     Rule2          : IPCB_Rule;
+    Rule3          : IPCB_Rule;
     RulesList      : TObjectList;
     Connection     : Integer;
     ViolCount      : integer;
+    ViolCount2     : integer;
     S, VersionStr  : String;
     MajorADVersion : Integer;
     found          : Boolean;
-    R              : integer;
+    R, SP          : integer;
+    StartLayer     : IPCB_LayerObject;
+    StopLayer      : IPCB_LayerObject;
+    ConnOnStart    : boolean;
+    ConnOnStop     : boolean;
+    Connected      : boolean;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -163,14 +181,23 @@ begin
 // test for special rule
 //    RulesList := TObjectList.Create;
     RulesList := GetMatchingRulesFromBoard(SpecialRuleKind);
-    Rule      := FoundRuleName(RulesList, SpecialRuleName);
+
+    Rule1      := FoundRuleName(RulesList, SpecialRuleName1);
+    Rule2      := FoundRuleName(RulesList, SpecialRuleName2);
 // load builtin NetAntennae rule
     RulesList := GetMatchingRulesFromBoard(eRule_NetAntennae);
 
-    if Rule = nil then  Rule := AddSpecialViaRule(SpecialRuleName, SpecialRuleKind);
-    if Rule <> nil then Rule.DRCEnabled := true;
+    if Rule1 = nil then  Rule1 := AddSpecialViaRule(SpecialRuleName1, SpecialRuleKind, 'Disabled ViaAntenna violations');
+    if Rule1 <> nil then Rule1.DRCEnabled := true;
+    if cViaStubStrict then
+    begin
+        if Rule2 = nil then  Rule2 := AddSpecialViaRule(SpecialRuleName2, SpecialRuleKind, 'Disabled ViaAntenna Stubs violations');
+        if Rule2 <> nil then Rule2.DRCEnabled := true;
+    end;
 
-    ViolCount := 0;
+    ViolCount  := 0;
+    ViolCount2 := 0;
+
     PLayerSet := LayerSetUtils.EmptySet;
     PLayerSet.IncludeSignalLayers;
     PLayerSet.Include(eMultiLayer);
@@ -179,43 +206,56 @@ begin
     Iter.AddFilter_ObjectSet(MkSet(eViaObject));
     Iter.AddFilter_IPCB_LayerSet(PLayerSet);         // SignalLayers &  eMultiLayer
 
-    SpIter := Board.SpatialIterator_Create;
-    SpIter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, ePadObject, eFillObject, eRegionObject));
+    PlaneIter := Board.BoardIterator_Create;
+    PlaneIter.AddFilter_ObjectSet(MkSet(eSplitPlaneObject));
+
+    SpatIter := Board.SpatialIterator_Create;
+    SpatIter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, ePadObject, eFillObject, eRegionObject));
 
     Via := Iter.FirstPCBObject;
     while (Via <> nil) do
     begin
-        Connection := 0;
+        Connection  := 0;
+        ConnOnStart := false;
+        ConnOnStop  := false;
+
         Via.SetState_DRCError(false);           // clear marker used without REAL violation object
 
-        Rectangle := Via.BoundingRectangle;
+        Rectangle  := Via.BoundingRectangle;
+        StartLayer := nil;
+        StopLayer  := nil;
 
-        VLI := Via.DefinitionLayerIterator;
-        VLI.AddFilter_ElectricalLayers;
-        VLI.SetBeforeFirst;
-        while (VLI.Next) do
+        LayerObj := LayerStack.FirstLayer;
+        while LayerObj <> nil do
         begin
-            Layer := VLI.Layer;
-            LayerObj := LayerStack.LayerObject_V7(Layer);
-//            LayerObj.Name;
+            if Via.StartLayer = LayerObj then
+                StartLayer := LayerObj;
+            if Via.StopLayer = LayerObj then
+                StopLayer := LayerObj;
 
-            if not LayerObj.IsInLayerStack then continue;
+            Connected   := false;
 
+            TV7_Layer := LayerObj.V7_LayerID;
+            Layer := TV7_Layer.ID;
+
+            PLayerSet := LayerSetUtils.EmptySet;
+            PLayerSet.Include(Layer);
+
+//  signal layers
+            if Via.IntersectLayer(Layer) then
             if LayerUtils.IsSignalLayer(Layer) then
             begin
                 found := false;
-                PLayerSet := LayerSetUtils.EmptySet;
-                PLayerSet.Include(Layer);
 
-                SpIter.AddFilter_Area(Rectangle.Left - 100, Rectangle.Bottom - 100, Rectangle.Right + 100, Rectangle.Top + 100);
-                SpIter.AddFilter_IPCB_LayerSet(PLayerSet);
+                SpatIter.AddFilter_Area(Rectangle.Left - 100, Rectangle.Bottom - 100, Rectangle.Right + 100, Rectangle.Top + 100);
+                SpatIter.AddFilter_IPCB_LayerSet(PLayerSet);
 
-                Prim := SpIter.FirstPCBObject;
+                Prim := SpatIter.FirstPCBObject;
                 while (Prim <> Nil) Do
                 begin
                     if (Prim.ObjectID = ePadObject) then
                     begin
-                        if Prim.ShapeOnLayer(Layer) then found := true;
+                        if Prim.ShapeOnLayer(Layer) <> eNoShape then found := true;
                     end else
                         if (Prim.Layer = Layer) then found := true;
 
@@ -223,51 +263,106 @@ begin
                     if found then
                     if Board.PrimPrimDistance(Prim, Via) = 0 then
                     begin
+                        Connected := true;
                         Inc(Connection);
                         break;
                     end;
-
-                    Prim := SpIter.NextPCBObject;
+                    Prim := SpatIter.NextPCBObject;
                 end;
-            end else
-                if Via.IsConnectedToPlane(Layer) then
-                    Inc(Connection);
+            end;
+
+//  Plane layers
+            if Via.IntersectLayer(Layer) then
+            if LayerUtils.IsInternalPlaneLayer(Layer) then
+            begin
+                PlaneIter.AddFilter_IPCB_LayerSet(PLayerSet);
+                SplitPlane := PlaneIter.FirstPCBObject;
+                while (SplitPlane <> Nil) Do
+                begin
+//                    if SplitPlane.PrimitiveInsidePoly(Via) then
+
+                    SPRGIter := SplitPlane.GroupIterator_Create;
+                    SPRGIter.AddFilter_IPCB_LayerSet(PLayerSet);
+                    SPRGIter.AddFilter_ObjectSet(MkSet(eRegionObject));
+                    SplitPlaneReg := SPRGIter.FirstPCBObject;
+                    while SplitPlaneReg <> nil do
+                    begin
+                        if Board.PrimPrimDistance(SplitPlaneReg, Via) = 0 then
+                        begin
+                            Connected := true;
+                            inc(Connection);
+                            break;
+                        end;
+                        SplitPlaneReg := SPRGIter.NextPCBObject;
+                    end;
+
+                    SplitPlane.GroupIterator_Destroy(SPRGIter);
+                    SplitPlane := PlaneIter.NextPCBObject;
+                end;
+            end;
+// stubs
+            if Connected then
+            begin
+                if LayerObj = StartLayer then ConnOnStart := true;
+                if LayerObj = StopLayer  then ConnOnStop  := true;
+            end;
+
+            LayerObj := LayerStack.NextLayer(LayerObj);
         end;
 
         if Connection = 1 then
         begin
             Violation := nil;
-            if Rule <> nil then
-                Violation := MakeViolation(Board, Rule, Via);
+            if Rule1 <> nil then
+                Violation := MakeViolation(Board, Rule1, Via);
             if Violation <> nil then inc(ViolCount);
       //      Via.Selected := True;
         end;
 
+        if cViaStubStrict then
+        if not (ConnOnstart and ConnOnStop) then
+        begin
+            Violation := nil;
+            if Rule2 <> nil then
+                Violation := MakeViolation(Board, Rule2, Via);
+            if Violation <> nil then inc(ViolCount2);
+        end;
+
         for R := 0 to (RulesList.Count - 1) do
         begin
-            Rule2 := RulesList.Items(R);
-            Violation := MakeViolation(Board, Rule2, Via);
+            Rule3 := RulesList.Items(R);
+            Violation := MakeViolation(Board, Rule3, Via);
             if Violation <> nil then inc(ViolCount);
         end;
-       
+
         Via := Iter.NextPCBObject;
     end;
 
-    Board.SpatialIterator_Destroy(SpIter);
+    Board.SpatialIterator_Destroy(SpatIter);
+    Board.BoardIterator_Destroy(PlaneIter);
     Board.BoardIterator_Destroy(Iter);
 
-    if Rule <> nil then
-    begin    
-        Rule.DRCEnabled := false;
-//   need to retain rule to make DRC UI display violation interactive
+//   need to retain rules to make DRC UI display violation interactive
+    if Rule1 <> nil then
+    begin
+        Rule1.DRCEnabled := false;
         if ViolCount = 0 then
         begin
-            Board.DestroyPCBObject(Rule);
-            PCBServer.DestroyPCBObject(Rule);
+            Board.RemovePCBObject(Rule1);
+            PCBServer.DestroyPCBObject(Rule1);
+        end;
+    end;
+    if Rule2 <> nil then
+    begin
+        Rule2.DRCEnabled := false;
+        if ViolCount2 = 0 then
+        begin
+            Board.RemovePCBObject(Rule2);
+            PCBServer.DestroyPCBObject(Rule2);
         end;
     end;
 
-    ShowInfo (IntToStr(ViolCount) + ' VIA violation(s) found/DRC marked');
+    ShowInfo (IntToStr(ViolCount) + ' VIA antenna + ' + IntToStr(Violcount2) + ' stub Violations found/DRC marked');
     EndHourGlass;
 
     Board.ViewManager_FullUpdate;
