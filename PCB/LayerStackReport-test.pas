@@ -33,6 +33,7 @@
  17/08/2022 0.63  Add drill layer pairs & add mechlayer kind text
  29/11/2022 0.64  add use LayerIterator.Layer to avoid TV7_Layer.ID
  15/02/2023 0.65  add 2 more layerkinds Capping & Filling
+ 2023-07-11 0.66  Implicit PcbLib test, eliminate _V7 methods if possible.
 
          tbd : find way to fix short & mid names if wrong.
                 Use Layer Classes test in AD17 & AD19
@@ -41,7 +42,8 @@
                 ILayerStackProvider / ILayerStackInfo / GUID
                 Not convinced about Board.LayerPositionInSet(AllLayers, LayerObj) as TV6_LayerSet junk.
 
-Alium GUI layers tab does not appear to use API to get Short & Medium length names.
+NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17 because it fails over eMech16!
+AD17 works with 32 mechlayers but the part of API (& UX) do not.
 
 More crappy Altium mess.
 
@@ -129,8 +131,10 @@ var
     Start, Stop : boolean;
 
 begin
-    Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then exit;
+    Board  := PCBServer.GetCurrentPCBBoard;
+    PCBLib := PCBServer.GetCurrentPCBLibrary;
+    if PCBLib <> nil then exit;
+    if Board = nil then exit;
 
     MLayerStack := Board.MasterLayerStack;
     BOrigin     := Point(Board.XOrigin, Board.YOrigin);
@@ -281,41 +285,36 @@ var
     BIterator : IPCB_BoardIterator;
     SR        : IPCB_Region;
     LS        : IPCB_LayerSet;
-    BRM       : IPCB_BoardRegionsManager;
+//    BRM       : IPCB_BoardRegionsManager;
     BR        : IPCB_BoardRegion;
     i         : integer;
 
 begin
+//  Default BOL Multilayer Stack Region, PCBLib has none.
     Result := TObjectList.Create;
     Result.OwnsObjects := false;
-    LS := LayerSetUtils.EmptySet;
-    LS.Include(eMultiLayer);
+    LS := LayerSetUtils.CreateLayerSet.Include(eMultiLayer);
     BIterator := Board.BoardIterator_Create;
     BIterator.AddFilter_IPCB_LayerSet(LS);
     BIterator.AddFilter_ObjectSet(MkSet(eRegionObject));
     SR := Biterator.FirstPCBObject;
     while SR <> nil do
     begin
-    // one stack has BoardRegion kind NamedRegion = 2
-    // but substack regions seem to be kind = 3  eRegionKind_BoardCutout ??
-    //  Default Layer Stack Region
-        if (SR.Kind = eRegionKind_NamedRegion) or (SR.Kind = 3) then
-        if (SR.Name <> '') then          // kludge hack ?
+       if SR.ViewableObjectID = eViewableObject_BoardRegion then 
             Result.Add(SR);
-        SR.InBoard;
+
         SR := Biterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(BIterator);
 
-{
-    BRM := Board.BoardRegionsManager;
+{   BRM := Board.BoardRegionsManager;
     BRM := IPCB_BoardRegionsManager;
     for i := 0 to (BRM.BoardRegionCount - 1) do
     begin
         BR := BRM.BoardRegion(i);
         BR.LayerStack.Name;    // match to get LS vs BR name
     end;
-} //    eBoardOutlineObject, eBoardRegionLayerStack,
+}
 end;
 
 // only called is const cCheckLayerNames is true
@@ -514,8 +513,6 @@ var
     Thick       : TCoord;
     LAddress    : integer;
     LSLIndex    : integer;
-    PlaneTLO    : IPCB_LayerObject;
-    PlaneBLO    : IPCB_LayerObject;
     LS         : IPCB_LayerSet;
 
 begin
@@ -539,13 +536,6 @@ begin
 
     LS := Board.ElectricalLayers;  // IPCB_Layerset
 
-    PlaneTLO := Board.MasterLayerStack.FirstAvailableInternalPlane;
-    if PlaneTLO <> nil then
-        PlaneTLO.V7_LayerID.ID;    // so max is one less.
-    PlaneBLO := Board.MasterLayerStack.LastInternalPlane;     // last in stack
-    if PlaneBLO <> nil then
-        PlaneBLO.V7_LayerID.ID;
-
     for LayerClass := LC1 to LC2 do
     begin
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
@@ -562,9 +552,6 @@ begin
 
         While (LayerObj <> Nil ) do
         begin
-
-//            Layer := LayerInLayerSet(LayerObj, LS);
-
             Layer  := GetLayerFromLayerObject(SubStack, LayerObj);
             Layer7 := LayerObj.V7_LayerID.ID;
 
@@ -664,7 +651,6 @@ Procedure LayerStackInfoTest;
 var
     BR          : IPCB_BoardRegion;
     SubStack    : IPCB_LayerStack;
-//    LayerStack  : IPCB_LayerStack;
     LIterator   : IPCB_LayerObjectIterator;
     LayerObj    : IPCB_LayerObject;
     Dielectric  : IPCB_DielectricObject;
@@ -676,7 +662,7 @@ var
     LayerKind   : WideString;
     LSR         : TObjectList;
     LowLayer, HighLayer : IPCB_LayerObject;
-    LowPos, HighPos     : integer;
+    LowPos,   HighPos   : integer;
     i           : integer;
     FileName    : String;
     XLayers     : string;
@@ -707,13 +693,14 @@ begin
     FileName := ExtractFilePath(FileName);
 
     MLayerStack := Board.MasterLayerStack;
+
 //    XLayers := WideStrAlloc(10000);
 //    MLayerStack.Export_ToParameters(XLayers);
 
-
     LSR := FindBoardStackRegions(Board);
 
-    TempS := TStringList.Create;
+    slMechPairs := TStringList.Create;
+    TempS       := TStringList.Create;
     TempS.Add('Altium Version: ' + Client.GetProductVersion);
     TempS.Add('');
     TempS.Add('-- Master Stack Info -- ');
@@ -727,7 +714,7 @@ begin
 }
     if PCBLib <> nil then
     begin
-        SubStack := Board.LayerStack;
+        SubStack := Board.MasterLayerStack;
         TempS.Add('Layer Stack: ' + PadRight(SubStack.Name, 30) + '  ID: ' + SubStack.ID);
         ReportSubStack(0, SubStack, 'LayerStack');
     end else
@@ -737,10 +724,8 @@ begin
         begin
             BR := LSR.Items(i);
             BR.Descriptor;
-            BR.Handle;
             BR.Identifier;
             BR.Index;
-            BR.ObjectIDString;
             BR.Detail;
             TempS.Add('Stack Region ' + IntToStr(i + 1) + '  name: ' + PadRight(BR.Name,30) + ' LS: DNK          area: ' + FormatFloat(',0.###', BR.Area / c1_00MM / c1_00MM) + ' sq.mm ' );
         end;
@@ -818,47 +803,52 @@ begin
 
 //        if (i = 33) then  ShowMessage( LongLName + ' ' + Inttostr(MechLayerKind));
     end;
-
     TempS.Add('');
-    TempS.Add('');
-    TempS.Add(' ----- MechLayerPairs -----');
     TempS.Add('');
 
-    MechLayerPairs := Board.MechanicalPairs;
+//   no mech pairs in AD17 PcbLib
+    if ((PCBLib = nil) and LegacyMLS) or (not LegacyMLS) then
+    begin
+        TempS.Add(' ----- MechLayerPairs -----');
+        TempS.Add('');
+
+        MechLayerPairs := Board.MechanicalPairs;
 
 // is this list always in the same order as MechanicalPairs ??
-    slMechPairs := FindAllMechPairLayers(MLayerStack, MechLayerPairs);
+        slMechPairs := FindAllMechPairLayers(MLayerStack, MechLayerPairs);
 
 //    StringToWideChar(XLayers, PWC, 5000);
 //    MechLayerPairs.Export_ToParameters(PWC);
 //    MechLayerPairs.LayerPair[0].LowLayer;   L0 LowerLayer
 //    MechLayerPairs.LayerPairLayerStackID(0);
 
-    TempS.Add('Mech Layer Pair Count : ' + IntToStr(MechLayerPairs.Count));
-    TempS.Add('');
-    if (MechLayerPairs.Count > 0) then
-        TempS.Add('Ind  LNum1 : LayerName1     <--> LNmum2 : LayerName2 ');
+        TempS.Add('Mech Layer Pair Count : ' + IntToStr(MechLayerPairs.Count));
+        TempS.Add('');
+        if (MechLayerPairs.Count > 0) then
+            TempS.Add('Ind  LNum1 : LayerName1     <--> LNmum2 : LayerName2 ');
 
-    if slMechPairs.Count <> MechLayerPairs.Count then
-        ShowMessage('Failed to find all Mech Pairs ');
+        if slMechPairs.Count <> MechLayerPairs.Count then
+            ShowMessage('Failed to find all Mech Pairs ');
 
-    for MechPairIndex := 0 to (slMechPairs.Count -1 ) do  //   (MechLayerPairs.Count - 1) do
-    begin
-        ML1 := slMechPairs.Names(MechPairIndex);
-        ML2 := slMechPairs.ValueFromIndex(MechPairIndex);
+        for MechPairIndex := 0 to (slMechPairs.Count -1 ) do  //   (MechLayerPairs.Count - 1) do
+        begin
+            ML1 := slMechPairs.Names(MechPairIndex);
+            ML2 := slMechPairs.ValueFromIndex(MechPairIndex);
 
 // bad assumption!
-        MechLayerPair := MechLayerPairs.LayerPair[MechPairIndex];   // __TMechanicalLayerPair__Wrapper()
+            MechLayerPair := MechLayerPairs.LayerPair[MechPairIndex];   // __TMechanicalLayerPair__Wrapper()
 
-        LayerKind := '';
-        if not LegacyMLS then
-        begin
-            LayerKind := 'LayerPairKind : ' + LayerPairKindToStr( MechLayerPairs.LayerPairKind(MechPairIndex) );
+            LayerKind := '';
+            if not LegacyMLS then
+            begin
+                LayerKind := 'LayerPairKind : ' + LayerPairKindToStr( MechLayerPairs.LayerPairKind(MechPairIndex) );
+            end;
+
+            TempS.Add(PadRight(IntToStr(MechPairIndex),3) + PadRight(IntToStr(ML1),3) + ' : ' + PadRight(Board.LayerName(ML1),20) +
+                               ' <--> ' + PadRight(IntToStr(ML2),3) + ' : ' + PadRight(Board.LayerName(ML2),20) + LayerKind);
         end;
-
-        TempS.Add(PadRight(IntToStr(MechPairIndex),3) + PadRight(IntToStr(ML1),3) + ' : ' + PadRight(Board.LayerName(ML1),20) +
-                                             ' <--> ' + PadRight(IntToStr(ML2),3) + ' : ' + PadRight(Board.LayerName(ML2),20) + LayerKind);
-    end;
+    end else
+        TempS.Add(' no MechLayerPairs in this version ');
 
  //  broken because no wrapper function to handle TMechanicalLayerPair record.
 { LayerPair[I : Integer] property defines indexed layer pairs and returns a TMechanicalLayerPair record of two PCB layers.
@@ -876,7 +866,7 @@ try:-
     I := 1;
     TempS.Add('');
     TempS.Add('idx Layer   Name');
-    LayerObj := MLayerStack.FirstLayer;
+    LayerObj := MLayerStack.First(eLayerClass_Electrical);
     while (LayerObj <> nil) do
     begin
         LOAddr := LayerObj.I_ObjectAddress;
@@ -885,7 +875,7 @@ try:-
 
         TempS.Add(PadRight(IntToStr(I),3) + Padright(IntToStr(Layer7),4) + ' ' + IntToStr(Layer6) + ' ' + LayerObj.Name  + '  ' + IntToHex(LOAddr,7) );
         inc(I);
-        LayerObj := MLayerStack.NextLayer(LayerObj);
+        LayerObj := MLayerStack.Next(eLayerClass_Electrical, LayerObj);
     end;
 
     FileName := GetWorkSpace.DM_FocusedDocument.DM_FullPath;
@@ -893,7 +883,8 @@ try:-
     FileName := ExtractFilePath(FileName) + '\layerstacktests.txt';
 
     TempS.SaveToFile(FileName);
-    Exit;
+    TempS.Free;
+    slMechPairs.Free;
 end;
 
 {......................................................................................................................}
@@ -994,6 +985,7 @@ begin
     end;
 end;
 
+// NOT possible to eliminate LayerObject_V7() with AD17.
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
 // is this list always in the same order as MechanicalPairs ??
 // no it is NOT & higher layer number can be top side layer !!
@@ -1198,10 +1190,7 @@ Begin
 
         TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(LowPos)  + ':' + StartLayer.Name  + ' - ' + IntToStr(HighPos) + ':' + StopLayer.Name
                   +  ' ' + DrillTypeToStr(DrillType) + ' '+BoolToStr(BackDrill,true) + ' ' + BooltoStr(CounterHole, true) );
-//        If LowPos <= HighPos Then
-//            TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(LowPos)  + ':' + LowLayerObj.Name  + ' - ' + IntToStr(HighPos) + ':' + HighLayerObj.Name)
-//        Else
-//            TempS.Add(IntToStr(i+1) + ' | ' + IntToStr(HighPos) + ':' + HighLayerObj.Name + ' - ' + IntToStr(LowPos)  + ':' + LowLayerObj.Name);
+
     End;
 End;
 

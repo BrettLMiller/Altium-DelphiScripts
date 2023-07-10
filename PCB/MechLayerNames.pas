@@ -24,6 +24,8 @@ Notes:
  AD21 Layer UI "Create CompLayer Pair" grabs the first free layers & then after you select target mech layer pair numbers..
       it leaves the defaults with same new mech layer names!!  At least they are not pairs!
 
+ NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17 because it fails over eMech16!
+ AD17 works with 32 mechlayers but the part of API (& UX) do not.
 
 
  Date        Ver  Comment
@@ -48,7 +50,7 @@ Notes:
  01/03/2023 1.46 add missing/new layerkinds
  2023-06-14 1.50 Import: need to remove layerkind existing in board before can assign it to new layer.
  2023-06-17 1.51 Import: simple layername check for keyword to determine top or bottom
-
+ 2023-07-11 1.52 Attempt to minimise _V7 methods.
 
   TMechanicalLayerToKindItem
 .............................................................................................
@@ -79,8 +81,8 @@ const
 var
     PCBSysOpts        : IPCB_SystemOptions;
     Board             : IPCB_Board;
-    LayerStack        : IPCB_LayerStack_V7;
-    LayerObj_V7       : IPCB_LayerObject_V7;
+    PCBLib            : IPCB_Library;
+    LayerStack        : IPCB_MasterLayerStack;
     MLayerKind        : TMechanicalLayerKind;
     MLayerPairKind    : TMechanicalLayerPairKind;
     MLayerKindStr     : WideString;
@@ -155,8 +157,12 @@ var
     bHasPairKinds    : boolean;
 
 begin
-    Board := PCBServer.GetCurrentPCBBoard;
+    Board  := PCBServer.GetCurrentPCBBoard;
+    PCBLib := PCBServer.GetCurrentPCBLibrary;
+    if PCBLib <> nil then
+        Board := PCBLib.Board;
     if Board = nil then exit;
+
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
@@ -199,7 +205,8 @@ begin
                                               // FileName                                   //Prompt=false
 //    Client.SendMessage('PCB:ExportMechLayers', 'FileName' + FilePath + cExportMLFilename + '|DisableDialog=True' , 255, Client.CurrentView);
 
-    LayerStack       := Board.LayerStack_V7;
+    LayerStack := Board.MasterLayerStack;
+
     MechLayerPairs   := Board.MechanicalPairs;
 //    slMechLayerPairs := FindAllMechPairLayers(LayerStack, MechLayerPairs);
     slUsedPairKinds  := FindUsedPairKinds(MechLayerPairs);
@@ -208,7 +215,7 @@ begin
     for i := 1 to MaxMechLayers do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7[ML1];
+        MechLayer := LayerStack.LayerObject_V7(ML1);
 
         if (i <= AllLayerDataMax) or MechLayer.MechanicalLayerEnabled then
         begin
@@ -282,8 +289,12 @@ var
     slUsedLayerKinds   : TStringList;
 
 begin
-    Board := PCBServer.GetCurrentPCBBoard;
+    Board  := PCBServer.GetCurrentPCBBoard;
+    PCBLib := PCBServer.GetCurrentPCBLibrary;
+    if PCBLib <> nil then
+        Board := PCBLib.Board;
     if Board = nil then exit;
+
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
@@ -307,11 +318,11 @@ begin
 
     FileName := OpenDialog.FileName;
     IniFile := TIniFile.Create(FileName);
-
     BeginHourGlass(crHourGlass);
-    LayerStack     := Board.LayerStack_V7;
-    MechLayerPairs := Board.MechanicalPairs;
 
+    LayerStack := Board.MasterLayerStack;
+
+    MechLayerPairs    := Board.MechanicalPairs;
     slUsedLPairKinds  := FindUsedPairKinds(MechLayerPairs);
     slUsedLayerKinds  := FindUsedLayerKinds(LayerStack);
     slUsedLPairKinds.Count;
@@ -325,7 +336,7 @@ begin
 
         if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
         begin
-            MechLayer := LayerStack.LayerObject_V7[ML1];
+            MechLayer := LayerStack.LayerObject_V7(ML1);
             LayerName1 := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name', 'eMech' + IntToStr(i));
             MechLayer.Name := LayerName1;
 
@@ -348,7 +359,7 @@ begin
     begin
         MLayerKind := NoMechLayerKind;
         ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7[ML1];
+        MechLayer := LayerStack.LayerObject_V7(ML1);
 
         if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
         begin
@@ -472,7 +483,10 @@ var
     i          : Integer;
 
 begin
-    Board := PCBServer.GetCurrentPCBBoard;
+    Board  := PCBServer.GetCurrentPCBBoard;
+    PCBLib := PCBServer.GetCurrentPCBLibrary;
+    if PCBLib <> nil then
+        Board := PCBLib.Board;
     if Board = nil then exit;
 
     VerMajor := Version(true).Strings(0);
@@ -490,7 +504,7 @@ begin
         exit;
     end;
 
-    LayerStack     := Board.LayerStack_V7;
+    LayerStack     := Board.MasterLayerStack;
     MechLayerPairs := Board.MechanicalPairs;
 
 // Could check a "PairKind" pair does have legacy "Pair" set..
@@ -504,7 +518,7 @@ begin
     for i := 1 To MaxMechLayers do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7[ML1];
+        MechLayer := LayerStack.LayerObject_V7(ML1);
 
         MechLayer.Kind := NoMechLayerKind;       //  'Not Set'
     end;
@@ -668,7 +682,7 @@ begin
     for i := 1 To MaxMechLayers do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7[ML1];
+        MechLayer := LayerStack.LayerObject_V7(ML1);
 
         MLayerKind := MechLayer.Kind;
         if MLayerKind <> NoMechLayerKind then
