@@ -21,6 +21,8 @@ B. Miller
 2023-07-08 : DefintionLayerIterator is useless; use board layerstack.
            : Fix broken Planes; has never worked since before AD16.
            : Add Strict stub via detection
+20230710   : use MasterLayerStack methods.
+           : IsConnectedToPlane(TV6Layer) still needed (Planes are TV6)
 
 Extra proc CleanViolations()  just in case clean up needed at some point..
 }
@@ -36,7 +38,7 @@ const
 
 var
     Board      : IPCB_Board;
-    LayerStack : IPCB_LayerStack_V7;
+    LayerStack : IPCB_MasterLayerStack;
 
 function GetMatchingRulesFromBoard (const RuleKind : TRuleKind) : TObjectList;
 var
@@ -137,7 +139,7 @@ var
     Prim           : IPCB_Primitive;
     SplitPlane     : IPCB_SplitPlane;
     SplitPlaneReg  : IPCB_SplitPlaneRegion;
-    LayerObj       : IPCB_LayerObject_V7;
+    LayerObj       : IPCB_LayerObject;
     PLayerSet      : IPCB_LayerSet;
     Layer          : TLayer;
     TV7_Layer      : IPCB_TV7_Layer;
@@ -170,7 +172,7 @@ begin
     S := Copy(VersionStr,0,2);
     MajorADVersion := StrToInt(S);
 
-    LayerStack := Board.LayerStack_V7;
+    LayerStack := Board.MasterLayerStack;
 
 // clear existing violations
     if ConfirmNoYes('Clear Existing DRC Violation Markers ? ') then
@@ -225,7 +227,7 @@ begin
         StartLayer := nil;
         StopLayer  := nil;
 
-        LayerObj := LayerStack.FirstLayer;
+        LayerObj := LayerStack.First(eLayerClass_Electrical);
         while LayerObj <> nil do
         begin
             if Via.StartLayer = LayerObj then
@@ -237,7 +239,7 @@ begin
 
             TV7_Layer := LayerObj.V7_LayerID;
             Layer := TV7_Layer.ID;
-
+//            showmessage(intTostr(Layer));
             PLayerSet := LayerSetUtils.EmptySet;
             PLayerSet.Include(Layer);
 
@@ -273,6 +275,7 @@ begin
 
 //  Plane layers
             if Via.IntersectLayer(Layer) then
+            if Via.IsConnectedToPlane(Layer) then
             if LayerUtils.IsInternalPlaneLayer(Layer) then
             begin
                 PlaneIter.AddFilter_IPCB_LayerSet(PLayerSet);
@@ -280,7 +283,6 @@ begin
                 while (SplitPlane <> Nil) Do
                 begin
 //                    if SplitPlane.PrimitiveInsidePoly(Via) then
-
                     SPRGIter := SplitPlane.GroupIterator_Create;
                     SPRGIter.AddFilter_IPCB_LayerSet(PLayerSet);
                     SPRGIter.AddFilter_ObjectSet(MkSet(eRegionObject));
@@ -307,7 +309,7 @@ begin
                 if LayerObj = StopLayer  then ConnOnStop  := true;
             end;
 
-            LayerObj := LayerStack.NextLayer(LayerObj);
+            LayerObj := LayerStack.Next(eLayerClass_Electrical, LayerObj);
         end;
 
         if Connection = 1 then
