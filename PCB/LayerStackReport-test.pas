@@ -42,7 +42,8 @@
                 ILayerStackProvider / ILayerStackInfo / GUID
                 Not convinced about Board.LayerPositionInSet(AllLayers, LayerObj) as TV6_LayerSet junk.
 
-NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17 because it fails over eMech16!
+NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17-AD23 because it fails over eMech16!
+Can only iterate the "enabled" board mech layerset.
 AD17 works with 32 mechlayers but the part of API (& UX) do not.
 
 More crappy Altium mess.
@@ -55,8 +56,54 @@ IPCB_LayerObject.V6_LayerID
 IPCB_LayerObject.GetState_LayerDisplayName(eLayerNameDisplay_Short)
 IPCB_LayerObject.GetState_LayerDisplayName(eLayerNameDisplay_Medium)
 
+IPCB_Layerobject2.GetState_DisplayInSingleLayerMode;
+IPCB_LayerObject2.SetState_DisplayInSingleLayerMode(true);
+
 
 Note: can report all mech layers in AD17-AD22
+
+                      V8_LID    V7_LID
+ Top Surface Finish = 1030000   ?27?      already inuse could be coverlay in AD17
+ Bottom Surface     = 1030001   ?28?        AD17  eTopCoverlayOutlineLayers
+                      1030002   ?29?              eBottomCoverlayOutlineLayers
+                      1030003   ?30?
+                      1030004   ?31?
+                      1030005   ?32?
+ Top Overlay        = 1030006   33
+ Bottom Overlay     = 1030007   34
+ Top Paste          = 1030008   35
+ Bottom Paste       = 1030009   36
+ Top Solder         = 103000A   37
+ Bottom Solder      = 103000B   38
+ IPlane1            = 1010001   39
+ Dielectric1        = 1040001   2010001
+ Mech Layer 1       = 1020001   57
+
+Stack export file.
+// LAYER_V8_2LAYERID=16973824                              1030000 hex
+// LAYER_V8_2ID={6E475535-500B-4A5B-B8EE-FE219503AF87}
+// LAYER_V8_2TYPEID={B0827674-798C-4CF8-807C-8E6C2A11C145}
+// LAYER_V8_2ISSURFACEFINISH=True|
+// LAYER_V8_2NAME=Top Surface Finish
+// LAYER_V8_2ISHIDDEN=False
+// LAYER_V8_2USEDBYPRIMS=False
+// LAYER_V8_2ISADVANCED=True
+// LAYER_V8_2$LSM$Material=Nickel, Gold
+// LAYER_V8_2$LSM$Process=ENIG|
+// LAYER_V8_2$LSM$Thickness=1.5748mil
+// LAYER_V8_2$LSM$Material.Color=#FFFFC400
+// LAYER_V8_2_{6A9FF12B-A611-4ECE-8D99-90921FD624DF}CONTEXT=0|
+// LAYER_V8_2_{6A9FF12B-A611-4ECE-8D99-90921FD624DF}USEDBYPRIMS=False|
+// LAYER_V8_2_{6A9FF12B-A611-4ECE-8D99-90921FD624DF}NAME=Top Surface Finish
+// LAYER_V8_2_{6A9FF12B-A611-4ECE-8D99-90921FD624DF}SHARED=0
+
+{
+Try Fix stack mess with:
+ LayerObject.SetState_LayerID()
+ LayerObject.SetState_LayerID(Layer7)   DNW with V6 or V7 LO.
+
+ LO.LayerID;        returns zero for dieletric layers.
+ LO.V7_LayerID.ID;  always works
 ..................................................................................}
 
 {.................................................................................}
@@ -67,24 +114,10 @@ const
     NoMechLayerKind   = 0;      // enum const does not exist for AD17/18
     cPasteThick       = 4       // std stencil (mil)
 
-    cPhysicalLSOnly   = true;   // only report the physical class.
+    cPhysicalLSOnly   = false;  // true;   // only report the physical class.
     cCheckLayerNames  = false;  // but can NOT change short & mid names of signal, plane & dielectric.
 
     NewStackPcbFileName = 'StackReOrder.PcbDoc';
-
-function LayerClassName (LClass : TLayerClassID) : WideString;                  forward;
-function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;       forward;
-function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;                forward;
-function Version(const dummy : boolean) : TStringList;                          forward;
-function FindAllMechPairLayers(LayerStack : IPCB_LayerStack;, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
-function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;                                 forward;
-function GetLayerFromLayerObject(LS: IPCB_LayerStack, LayerObj : IPCB_LayerObject) : TLayer; forward;
-function FindInLayerClass(AStack : IPCB_LayerStack, LayerObj : IPCB_LayerObject, const LayerClass : TLayerClassID) : integer;           forward;
-function GetLayerObjectFromShortName(LS : IPCB_LayerStack, const LayerClass : TLayerClassID, const SN : WideString) : IPCB_LayerObject; forward;
-procedure ReportDrillPairs(Board : IPCB_Board, SubStack : IPCB_LayerStack);                  forward;
-function DrillTypeToStr(DType : TDrillLayerPairType) : Widestring;                           forward;
-function RemoveLayers(AStack : IPCB_LayerStack, const LayerClass : TLayerClassID) : integer; forward;
-function GetLoadPcbDocByPath(LibPath : Widestring, const Load : boolean) : IPCB_Board;       forward;
 
 var
     PCBSysOpts     : IPCB_SystemOptions;
@@ -111,6 +144,23 @@ var
     ReportLog   : TStringList;
     BOrigin     : TCoordPoint;
 
+function LayerClassName (LClass : TLayerClassID) : WideString;                  forward;
+function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;       forward;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;                forward;
+function Version(const dummy : boolean) : TStringList;                          forward;
+function FindAllMechPairLayers(LayerStack : IPCB_MasterLayerStack;, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
+function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;                                 forward;
+function GetLayerFromLayerObject(LS: IPCB_LayerStack, LayerObj : IPCB_LayerObject) : TLayer; forward;
+function FindInLayerClass(AStack : IPCB_LayerStack, LayerObj : IPCB_LayerObject, const LayerClass : TLayerClassID) : integer;           forward;
+function GetLayerObjectFromShortName(LS : IPCB_LayerStack, const LayerClass : TLayerClassID, const SN : WideString) : IPCB_LayerObject; forward;
+procedure ReportDrillPairs(Board : IPCB_Board, SubStack : IPCB_LayerStack);                  forward;
+function DrillTypeToStr(DType : TDrillLayerPairType) : Widestring;                           forward;
+function RemoveLayers(AStack : IPCB_LayerStack, const LayerClass : TLayerClassID) : integer; forward;
+function GetLoadPcbDocByPath(LibPath : Widestring, const Load : boolean) : IPCB_Board;       forward;
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) :IPCB_MechanicalLayer;          forward;
+function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer; forward;
+
+
 procedure MakeNewLayerStackCopy;
 var
     ServDoc    : IServerDocument;
@@ -129,6 +179,7 @@ var
     IsSignal   : boolean;
     PN, DI, SI : integer;
     Start, Stop : boolean;
+    OShortLName : Widestring;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
@@ -181,8 +232,13 @@ begin
         end;
     end;
 
-// tbd surface finish
+// tbd surface finish   customData ??
+//   Process
+//   Material
+//   Material.Color
+//   Thickness
 
+    ReportLog.Add('O:NLID   OName  NewName  IsSig IsPl SI PN DI   ');
 
     LayerClass := eLayerClass_Physical;
 // build all above bottom copper layer.
@@ -192,12 +248,13 @@ begin
     LayerObj := MLayerStack.First(LayerClass);
     While LayerObj <> nil do
     begin
-        Layer7 := LayerObj.V7_LayerID;
-        Layer     := Layer7.ID;
+        Layer     := LayerObj.V7_LayerID.ID;
         IsPlane   := LayerUtils.IsInternalPlaneLayer(Layer);
         IsSignal  := LayerUtils.IsSignalLayer(Layer);
         Layerutils.IsMidLayer(Layer);
         LayerObj.Name;
+
+        NewLO := NewMLS.LayerObject(Layer);
 //        NewBrd.LayerColor(LayerObj.V6_LayerID) := Board.LayerColor(LayerObj.V6_LayerID);
 
         Case Layer of
@@ -209,6 +266,11 @@ begin
                 NewLO.Name               := LayerObj.Name;
                 NewLO.ComponentPlacement := LayerObj.ComponentPlacement;
                 NewLO.CopperThickness    := LayerObj.CopperThickness;
+                if not LegacyMLS then
+                begin
+                    NewLO.CopperOrientation := LayerObj.CopperOrientation;
+//                    NewLO.Weight := LayerObj.Weight;
+                end;
             end;
         eBottomLayer :
             begin
@@ -218,6 +280,11 @@ begin
                 NewLO.Name               := LayerObj.Name;
                 NewLO.ComponentPlacement := LayerObj.ComponentPlacement;
                 NewLO.CopperThickness    := LayerObj.CopperThickness;
+                if not LegacyMLS then
+                begin
+                    NewLO.CopperOrientation := LayerObj.CopperOrientation;
+//                    NewLO.Weight := LayerObj.Weight;
+                end;
             end;
         else
             if Start and (not Stop) then
@@ -230,6 +297,11 @@ begin
                     NewLO.Name               := LayerObj.Name;
                     NewLO.ComponentPlacement := LayerObj.ComponentPlacement;
                     NewLO.CopperThickness    := LayerObj.CopperThickness;
+                    if not LegacyMLS then
+                    begin
+                        NewLO.CopperOrientation := LayerObj.CopperOrientation;
+//                        NewLO.Weight := LayerObj.Weight;
+                    end;
                 end;
 
                 if IsPlane then
@@ -241,8 +313,13 @@ begin
 //                    NewLO := NewMLS.LayerObject(NewLayer);
                     NewLO.Name             := LayerObj.Name;
                     NewLO.CopperThickness  := LayerObj.CopperThickness;
+                    if not LegacyMLS then
+                    begin
+                        NewLO.CopperOrientation := LayerObj.CopperOrientation;
+//                        NewLO.Weight := LayerObj.Weight;
+                    end;
                     NewLO.PullBackDistance := LayerObj.PullBackDistance;
-                    NewLO.NetName          := LayerObj.Netname;
+                    NewLO.NetName          := LayerObj.Netname;     // meaningless with IPCB_SplitPlanes
                 end;
 
 // dielectrics automatically inserted with copper.
@@ -267,8 +344,15 @@ begin
                     NewLO.SetState_DielectricMaterial( LayerObj.DielectricMaterial );
                     NewLO.DielectricConstant := LayerObj.DielectricConstant;
                 end;
+
             end;
-        end;
+        end;  //case
+
+        OShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
+
+        ReportLog.Add(IntToStr(Layer) + ' | ' + IntToStr(NewLO.V7_LayerID.ID) + ' | ' + LayerObj.Name + ' | ' + NewLO.Name +
+                      ' | ' + BoolToStr(IsSignal, true) + ' | ' + BoolToStr(IsPlane, true) + ' | ' + IntToStr(SI) +
+                      ' | ' + IntToStr(PN) + ' | ' + IntToStr(DI) );
 
         LayerObj := MLayerStack.Next(LayerClass, LayerObj);
     end;
@@ -350,6 +434,7 @@ begin
 
     While (LayerObj <> Nil ) do
     begin
+//        Layer := LayerObj.LayerID;  // zero for dielectrics
         Layer := LayerObj.V7_LayerID.ID;
         LayerObj.IsInLayerStack;       // check always true.
 
@@ -499,7 +584,8 @@ var
     LayerPos    : integer;
     LayerPosS   : WideString;
     Thickness   : WideString;
-    DieType     : WideString;
+    DieType     : TDielectricType;
+    DieTypeS    : WideString;
     DieMatl     : WideString;
     DieConst    : WideString;
     LColour     : WideString;
@@ -513,7 +599,7 @@ var
     Thick       : TCoord;
     LAddress    : integer;
     LSLIndex    : integer;
-    LS         : IPCB_LayerSet;
+    LS          : IPCB_LayerSet;
 
 begin
 
@@ -554,6 +640,9 @@ begin
         begin
             Layer  := GetLayerFromLayerObject(SubStack, LayerObj);
             Layer7 := LayerObj.V7_LayerID.ID;
+//            Board.LayerStack.LayerObject(Layer7).SetState_LayerID(Layer7);
+
+//            LayerObj.SetState_V7_LayerID(Layer7);
 
             LayerObj.IsInLayerStack;       // check always true.
 // fight to get gerber index layer numbers.
@@ -562,31 +651,46 @@ begin
 
             LayerPos  := 0; LayerPosS := '';
             Thick     := 0; Thickness := '';
-            DieType   := '';
+            DieType   := -1;
+            DieTypeS  := '';
             DieMatl   := '';
             DieConst  := '';     // as string for simplicity of reporting
 
             IsPlane  := LayerUtils.IsInternalPlaneLayer(Layer);
             IsSignal := LayerUtils.IsSignalLayer(Layer);
 
+            LayerUtils.IsElectricalLayer(27);            // AD17 Mid Layer26
+            LayerUtils.AsString(196608);  // 16973824); // 33619963);
+            LayerUtils.FromString('Top Surface Finish');  // AD17=0
+
+            if false then
+            for I:= 2010000 to 2020000 do
+            begin
+                DieMatl := LayerUtils.AsString(I);
+                if DieMatl <> 'No Layer' then
+                    Showmessage(IntToHex(I,7) + ' ' + DieMatl);
+            end;
+
             if IsSignal or LayerUtils.IsElectricalLayer(Layer) or IsPlane then
             begin
                 Copper    := LayerObj;
+                if not LegacyMLS then
+                    Copper.CopperOrientation;
                 Thick     := Copper.CopperThickness;
                 Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
                 DieMatl := 'foil';
+                DieTypeS := 'copper';
 
             //  only applies to eLayerClass_Electrical   ret zero for InternalPlanes - set not right
                 LayerPos  := Board.LayerPositionInSet(AllLayers, LayerObj);  // AllLayers
                 if IsPlane then
                 begin
-                    Plane := LayerObj;       //  IPCB_InternalPlane
+                    Plane := LayerObj;
                     Plane.PullBackDistance;  //  Plane.NetName;
                 end;
             end
             else if (Layer = eTopPaste) or (Layer = eBottomPaste) then
-            begin
-                LayerObj.Name ;             // TPasteMaskLayerAdapter()
+            begin            // TPasteMaskLayerAdapter()
                 Thick     := LayerObj.CopperThickness;   // nonsense default value
                 Thick     := MilsToCoord(cPasteThick);
                 Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
@@ -595,21 +699,26 @@ begin
             begin
                  Thick     := MilsToCoord(0.2);
                  Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
-                 LayerObj.Name;
-            end
-            else
-            begin   // dielectrics     eSurface eCore ePrepreg
-                 Dielectric := LayerObj;  //       IPCB_DielectricLayer
-                 DieType    := kDielectricTypeStrings(Dielectric.DielectricType);
-                 if (Dielectric.DielectricType = eSurfaceMaterial) then DieType := 'Surface';
-                 if Dielectric.DielectricType = eCore then DieType := 'Core';
-                 Thick     :=  Dielectric.DielectricHeight;
-                 Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
-                 DieMatl   := Dielectric.DielectricMaterial;
-                 DieConst  := FloatToStr(Dielectric.DielectricConstant);
+            end else
+            begin   // dielectrics     eNoDie.. eSurfaceMaterial eCore ePrepreg
+                Dielectric := LayerObj;  //       IPCB_DielectricLayer
+                DieType := Dielectric.DielectricType;
+                DieTypeS   := kDielectricTypeStrings(DieType);
+                if (DieType = eNoDielectric)    then DieTypeS := 'undefined';
+                if (DieType = eSurfaceMaterial) then DieTypeS := 'Surface';
+                if (DieType = ePrePreg)         then DieTypeS := 'Pre-Preg';
+                if DieType  = eCore             then DieTypeS := 'Core';
+                Thick     :=  Dielectric.DielectricHeight;
+                Thickness := CoordUnitToStringWithAccuracy(Thick, eMetric, 3, 4);
+                DieMatl   := Dielectric.DielectricMaterial;
+                DieConst  := FloatToStr(Dielectric.DielectricConstant);
+//                if not LegacyMLS then
+//                if (Layer = eTopSolder) or (Layer = eBottomSolder) then
+//                    Dielectric.CoverlayExpansion;  //CustomData
+
             end;
 
-         // sum class Physical thickness but do not sum pastemask..
+//      sum class Physical thickness but do not sum pastemask..
             if (LayerClass = eLayerClass_Physical) then
             begin
                 if (Layer = eTopPaste) or (Layer = eBottomPaste) then
@@ -617,10 +726,10 @@ begin
                 TotThick := TotThick + Thick;
             end;
 
-   //     TLayernameDisplayMode: eLayerNameDisplay_Short/Medium/Long
+//          TLayernameDisplayMode: eLayerNameDisplay_Short/Medium/Long
             ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
             MidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
-// LongLname is same as LO.Name
+//   LongLname is same as LO.Name
             LongLName  := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long) ;
 
             IsDisplayed := Board.LayerIsDisplayed(Layer);
@@ -636,7 +745,7 @@ begin
                       + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 13) // + '  ' + PadRight(LongLName, 20)
                       + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
                       + PadLeft(IntToStr(Layer), 9) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true), 6)
-                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7));
+                      + PadRight(DieTypeS, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7));
 
             LayerObj := SubStack.Next(Layerclass, LayerObj);
             Inc(i);
@@ -668,6 +777,7 @@ var
     XLayers     : string;
     LSLIndex    : integer;
     Layer6      : TV6Layer;
+    slCustom    : TStringList;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
@@ -731,9 +841,6 @@ begin
         end;
 
         TempS.Add('');
-//        SubStack := Board.LayerStackBase;
-//        TempS.Add('Layer Stack Base: ' + PadRight(SubStack.Name, 30) + '  ID: ' + SubStack.ID);
-//        ReportSubStack(0, SubStack, 'BaseStack');
 
         TempS.Add('');
         TempS.Add('Number of Sub Stacks: ' + IntToStr(MLayerStack.SubstackCount) );
@@ -770,28 +877,34 @@ begin
     TempS.Add('');
     TempS.Add('idx  LayerID   boardlayername       layername           short mid            long             kind              UsedByPrims ');
 
+
+// whole lot of nothing.
+    LayerObj := MLayerStack.First(eLayerClass_Mechanical);
+    i := 0;
+    While (LayerObj <> Nil ) do
+    begin
+       inc(i);
+       LayerObj := MLayerStack.Next(eLayerClass_Mechanical, LayerObj);
+    end;
+
     i := 0;
     LIterator := Board.MechanicalLayerIterator;
+    LIterator.AddFilter_MechanicalLayers;
+    LIterator.SetBeforeFirst;
     While LIterator.Next Do
     Begin
         Inc(i);
         LayerObj := LIterator.LayerObject;
         Layer    := LIterator.Layer;
 
+/// V8 LayerID
         LSLIndex := GetLayerSetCamViewNumber(Layer);
 
-//    Old Methods for Mechanical Layers. Can list all disabled layers
-//    LayerStack := Board.LayerStack_V7;
-//    for i := 1 to 64 do
-//    begin
-//        ML1 := LayerUtils.MechanicalLayer(i);
-//        LayerObj := LayerStack.LayerObject_V7[ML1];
-
-        LayerName := 'broken method NO name';
         MechLayerKind := NoMechLayerKind;
+        LayerName     := LayerObj.Name;
 
-        LayerName  := LayerObj.Name;
-        ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);  // TLayernameDisplayMode: eLayerNameDisplay_Short/Medium
+         // TLayernameDisplayMode: eLayerNameDisplay_Short / Medium / Long
+        ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short);
         MidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
         LongLName  := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long);
 
@@ -801,7 +914,6 @@ begin
                   + ' ' + PadRight(LayerName, 20) + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 20)
                   + ' ' + PadRight(LayerKindToStr(MechLayerKind),18) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true),8)  + ' GI:' + IntToStr(LSLIndex) + ':' + IntToHex(LSLIndex,7) );
 
-//        if (i = 33) then  ShowMessage( LongLName + ' ' + Inttostr(MechLayerKind));
     end;
     TempS.Add('');
     TempS.Add('');
@@ -817,11 +929,6 @@ begin
 // is this list always in the same order as MechanicalPairs ??
         slMechPairs := FindAllMechPairLayers(MLayerStack, MechLayerPairs);
 
-//    StringToWideChar(XLayers, PWC, 5000);
-//    MechLayerPairs.Export_ToParameters(PWC);
-//    MechLayerPairs.LayerPair[0].LowLayer;   L0 LowerLayer
-//    MechLayerPairs.LayerPairLayerStackID(0);
-
         TempS.Add('Mech Layer Pair Count : ' + IntToStr(MechLayerPairs.Count));
         TempS.Add('');
         if (MechLayerPairs.Count > 0) then
@@ -830,7 +937,7 @@ begin
         if slMechPairs.Count <> MechLayerPairs.Count then
             ShowMessage('Failed to find all Mech Pairs ');
 
-        for MechPairIndex := 0 to (slMechPairs.Count -1 ) do  //   (MechLayerPairs.Count - 1) do
+        for MechPairIndex := 0 to (slMechPairs.Count -1 ) do
         begin
             ML1 := slMechPairs.Names(MechPairIndex);
             ML2 := slMechPairs.ValueFromIndex(MechPairIndex);
@@ -861,11 +968,16 @@ begin
 try:-
   .LowLayer      DNW
   .HighLayer
+
+//    StringToWideChar(XLayers, PWC, 5000);
+//    MechLayerPairs.Export_ToParameters(PWC);
+//    MechLayerPairs.LayerPair[0].LowLayer;   L0 LowerLayer
+//    MechLayerPairs.LayerPairLayerStackID(0);
 }
 
     I := 1;
     TempS.Add('');
-    TempS.Add('idx Layer   Name');
+    TempS.Add('idx Layer    Name      LOAddr');
     LayerObj := MLayerStack.First(eLayerClass_Electrical);
     while (LayerObj <> nil) do
     begin
@@ -885,6 +997,15 @@ try:-
     TempS.SaveToFile(FileName);
     TempS.Free;
     slMechPairs.Free;
+
+    if not LegacyMLS then
+    begin
+        slCustom := TStringList.Create;
+        slCustom.Add(MLayerStack.GetState_CustomData);
+        FileName := ExtractFilePath(FileName) + '\layerstackcustomdata.txt';
+        slCustom.SaveToFile(FileName);
+        slCustom.Free;
+    end;
 end;
 
 {......................................................................................................................}
@@ -986,7 +1107,7 @@ begin
 end;
 
 // NOT possible to eliminate LayerObject_V7() with AD17.
-function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
+function FindAllMechPairLayers(LayerStack : IPCB_MasterLayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
 // is this list always in the same order as MechanicalPairs ??
 // no it is NOT & higher layer number can be top side layer !!
 var
@@ -1000,21 +1121,52 @@ begin
 
     for i := 1 to MaxMechLayers do
     begin
-        ML1       := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7(ML1);
+        MechLayer := GetMechLayerObject(LayerStack, i, ML1);
 
         if MechLayer.MechanicalLayerEnabled then
         begin
             for j := (i + 1) to MaxMechLayers do
             begin
-                ML2        := LayerUtils.MechanicalLayer(j);
-                MechLayer2 := LayerStack.LayerObject_V7(ML2);
+                MechLayer2 := GetMechLayerObject(LayerStack, j, ML2);
+
                 if MechLayer2.MechanicalLayerEnabled then
                 if MLPS.PairDefined(ML1, ML2) then
                 if (MLPS.LayerUsed(ML1) and MLPS.LayerUsed(ML2)) then
                     Result.Add(IntToStr(ML1) + '=' + IntToStr(ML2));
             end;
         end;
+    end;
+end;
+
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
+begin
+    if LegacyMLS then
+    begin
+        MLID := LayerUtils.MechanicalLayer(i);
+        Result := LS.LayerObject_V7(MLID)
+    end else
+    begin
+        Result := LS.GetMechanicalLayer(i);
+        MLID := Result.V7_LayerID.ID;       // .LayerID returns zero for dielectric
+    end;
+end;
+                                                            // cardinal      V7 LayerID
+function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer;
+var
+    AMLID      : TLayer;
+    AMechLayer : IPCB_MechanicalLayer;
+    J          : integer;
+begin
+    Result := nil;
+    AMLID  := 0;
+    for J := 1 to MaxMechLayers do
+    begin
+        AMechLayer :=  GetMechLayerObject(LS, J, AMLID);
+        if AMLID <> MLID then continue;
+
+        I := J;                // return cardinal index
+        Result := AMechLayer;
+        break;
     end;
 end;
 
@@ -1060,6 +1212,7 @@ begin
         LIterator := Board.MechanicalLayerIterator
     else LIterator := Board.LayerIterator_IncludeNonEditable;
 
+    LIterator.setBeforeFirst;
     While LIterator.Next Do
     Begin
         if LayerObj = LIterator.LayerObject then
@@ -1109,7 +1262,7 @@ begin
     slLayerSet.NameValueSeparator := '~';
     slLayerSet.StrictDelimiter := true;
     ALayerSet := LayerSetUtils.CreateLayerSet.Include(Layer);
-    LSText := LayerSetutils.SerializeToString(ALayerSet);
+    LSText := LayerSetUtils.SerializeToString(ALayerSet);
     slLayerset.DelimitedText := LSText;
     Idx := -1;
     Idx := slLayerSet.IndexofName('Standard.Include');
@@ -1206,6 +1359,19 @@ begin
 end;
 
 {
+IPCB_LayerListIterator
+    LIterator := LayerUtils.LayerIterator_PossibleLayers;
+    LIterator.AddFilter_ElectricalLayers;
+    LIterator.AddFilter_MiscLayers;
+    LIterator.SetBeforeFirst;
+    while LIterator.Next do
+    begin
+        I     := LIterator.Index;
+        Layer := LIterator.Layer;
+        ShowMessage(IntToStr(I) + ' ' + IntToStr(Layer) + ' ' + LayerUtils.AsString(Layer) );
+    end;
+
+
 // Use of LayerObject method to display specific layers
     Var
        Board      : IPCB_Board;

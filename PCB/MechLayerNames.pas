@@ -51,6 +51,7 @@ Notes:
  2023-06-14 1.50 Import: need to remove layerkind existing in board before can assign it to new layer.
  2023-06-17 1.51 Import: simple layername check for keyword to determine top or bottom
  2023-07-11 1.52 Attempt to minimise _V7 methods.
+ 2023-07-12 1.53 V7 methods eliminated for AD19+, Import: if unpair existing then rename to reduce keyword name confusion.
 
   TMechanicalLayerToKindItem
 .............................................................................................
@@ -108,6 +109,9 @@ function FindUsedPairKinds(MLPS : IPCB_MechanicalLayerPairs) : TStringList;     
 function FindUsedLayerKinds(LayerStack : IPCB_LayerStack) : TStringList;                   forward;
 function GuessLayerPairKind(MLayerKind : TMechanicalLayerKind) : TMechanicalLayerPairKind; forward;
 Procedure ConvertMechLayerKindToLegacy_Wrapped(dummy : integer);                           forward;
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) :IPCB_MechanicalLayer;            forward;
+function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer; forward;
+
 {.........................................................................................................}
 
 Procedure UnPairCurrentMechLayer;
@@ -214,8 +218,8 @@ begin
 
     for i := 1 to MaxMechLayers do
     begin
-        ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7(ML1);
+        MechLayer := GetMechLayerObject(LayerStack, i, ML1);
+//        ML1 := MechLayer.LayerID;
 
         if (i <= AllLayerDataMax) or MechLayer.MechanicalLayerEnabled then
         begin
@@ -263,6 +267,7 @@ begin
         end;
     end;
     IniFile.Free;
+    slUsedPairKinds.Free;
     EndHourGlass;
     ShowMessage('Warning: LayerPair Kinds are ONLY a best guess. ' + #13
                 +' Check the inifile PairKind values. ');
@@ -283,7 +288,7 @@ var
     Pair2LID           : integer;
     LColour            : TColor;
     ML1, ML2           : integer;
-    i, j               : Integer;
+    i, j, k            : Integer;
 
     slUsedLPairKinds   : TStringList;
     slUsedLayerKinds   : TStringList;
@@ -332,11 +337,10 @@ begin
 // set all new layer names
     for i := 1 To MaxMechLayers do
     begin
-        ML1 := LayerUtils.MechanicalLayer(i);
+        MechLayer :=  GetMechLayerObject(LayerStack, i, ML1);
 
         if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
         begin
-            MechLayer := LayerStack.LayerObject_V7(ML1);
             LayerName1 := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name', 'eMech' + IntToStr(i));
             MechLayer.Name := LayerName1;
 
@@ -358,8 +362,7 @@ begin
     for i := 1 To MaxMechLayers do
     begin
         MLayerKind := NoMechLayerKind;
-        ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7(ML1);
+        MechLayer  :=  GetMechLayerObject(LayerStack, i, ML1);
 
         if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
         begin
@@ -392,8 +395,10 @@ begin
                 ML2 := slUsedLayerKinds.ValueFromIndex(j);
                 if ML2 <> ML1 then
                 begin
-                     MechLayer2 := LayerStack.LayerObject_V7(ML2);
+                     MechLayer2 := GetMechLayerObjectFromLID7(LayerStack, k, ML2);
                      MechLayer2.Kind := NoMechLayerKind;
+//                 remove confusing name with reserved keywords.
+                     MechLayer2.Name := 'Mech Layer ' + IntToStr(k);
                 end;
             end;
 
@@ -413,8 +418,7 @@ begin
 
                 MLayerKind2     := NoMechLayerKind;
                 MLayerPairKind2 := NoMechLayerKind;
-                ML2             := LayerUtils.MechanicalLayer(j);
-                MechLayer2      := LayerStack.LayerObject_V7(ML2);
+                MechLayer2      :=  GetMechLayerObject(LayerStack, j, ML2);
 
                 LayerName2         := IniFile.ReadString('MechLayer' + IntToStr(j), 'Name', 'Mechanical ' + IntToStr(j));
                 MLayerKindStr2     := IniFile.ReadString('MechLayer' + IntToStr(j), 'Kind',      LayerKindToStr(NoMechLayerKind) );
@@ -429,7 +433,7 @@ begin
 //                end;
 
 // does ML2 name (from file) match ML1 paired layer name
-// simple laayername text match for bottom vs top.
+// simple layername text match for bottom vs top.
                 MechPairIdx := -1;
                 if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML1, ML2) then
                 begin
@@ -465,6 +469,8 @@ begin
 
     EndHourGlass;
     IniFile.Free;
+    slUsedLPairKinds.Free;
+    slUsedLayerKinds.Free;
     Board.ViewManager_UpdateLayerTabs;
     ShowInfo('Mechanical Layer Names & Colours (& pairs) updated.');
 end;
@@ -517,9 +523,7 @@ begin
 
     for i := 1 To MaxMechLayers do
     begin
-        ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7(ML1);
-
+        MechLayer :=  GetMechLayerObject(LayerStack, i, ML1);
         MechLayer.Kind := NoMechLayerKind;       //  'Not Set'
     end;
 end;
@@ -610,6 +614,38 @@ begin
     else              Result := 'Unknown'
     end;
 end;
+                                                    // cardinal      V7 LayerID
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
+begin
+    if LegacyMLS then
+    begin
+        MLID := LayerUtils.MechanicalLayer(i);
+        Result := LS.LayerObject_V7(MLID)
+    end else
+    begin
+        Result := LS.GetMechanicalLayer(i);
+        MLID := Result.LayerID;
+    end;
+end;
+                                                            // cardinal      V7 LayerID
+function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer;
+var
+    AMLID      : TLayer;
+    AMechLayer : IPCB_MechanicalLayer;
+    J          : integer;
+begin
+    Result := nil;
+    AMLID  := 0;
+    for J := 1 to MaxMechLayers do
+    begin
+        AMechLayer :=  GetMechLayerObject(LS, J, AMLID);
+        if AMLID <> MLID then continue;
+
+        I := J;                // return cardinal index
+        Result := AMechLayer;
+        break;
+    end;
+end;
 
 function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;
 var
@@ -650,15 +686,14 @@ begin
 
     for i := 1 to MaxMechLayers do
     begin
-        ML1        := LayerUtils.MechanicalLayer(i);
-        MechLayer1 := LayerStack.LayerObject_V7(ML1);
+        MechLayer1 :=  GetMechLayerObject(LayerStack, i, ML1);
 
         if MechLayer1.MechanicalLayerEnabled then
         begin
             for j := (i + 1) to MaxMechLayers do
             begin
-                ML2        := LayerUtils.MechanicalLayer(j);
-                MechLayer2 := LayerStack.LayerObject_V7(ML2);
+                MechLayer2 :=  GetMechLayerObject(LayerStack, j, ML2);
+
                 if MechLayer2.MechanicalLayerEnabled then
                 if MLPS.PairDefined(ML1, ML2) then
 //                if (MLPS.LayerUsed(ML1) and MLPS.LayerUsed(ML2)) then
@@ -681,8 +716,7 @@ begin
 
     for i := 1 To MaxMechLayers do
     begin
-        ML1 := LayerUtils.MechanicalLayer(i);
-        MechLayer := LayerStack.LayerObject_V7(ML1);
+        MechLayer :=  GetMechLayerObject(LayerStack, i, ML1);
 
         MLayerKind := MechLayer.Kind;
         if MLayerKind <> NoMechLayerKind then
