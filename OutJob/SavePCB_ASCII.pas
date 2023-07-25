@@ -131,8 +131,9 @@ begin
 
     Result :=                cSourceFileNameParameter + '=' + TargetPCB;
     Result := Result + '|' + cSourceFolderParameter   + '=' + SourceFolder;
-// expt extra spaces in name
 //    Result := Result + '|' + 'TargetFileName'         + '=' + OutputFN;
+
+// expt extra spaces in name to influence duplicates.
 //    Result := Result + '|' + ' TargetFileName'         + '=' + OutputFN;
 //    Result := Result + '|' + 'TargetFileName '         + '=' + OutputFN;
 end;
@@ -211,7 +212,7 @@ begin
 end;
 
 // direct call method for testing
-procedure main;
+procedure main(hideme : integer);
 var
     Doc   : IDocument;
 begin
