@@ -19,7 +19,11 @@ This causes problem making SchLib from these Comps.
  27/02/2020 v1.1  Diff report info for SchLib vs SchDoc & tweaks for SchLibs
                   No special treatment for DbLib sourced comps..
  28/02/2020 v1.2  Overwrite .SymbolReference so DBLib sourced comps can be made into SchLib.
+ 19/10/2020 v1.3  Added function to completely delete the model SchImp. to make Components into Symbols
+ 2023-07-27 v1.4  Full Wipeout: remove all Comp parameters & models. Set Comment & Desc.
 
+
+tbd: SchLib still needs Comp navigation to refresh SchImp models display
 ..................................................................................}
 
 {..............................................................................}
@@ -31,6 +35,8 @@ Var
     Prj         : IProject;
     Doc         : IDocument;
     dConfirm    : boolean;
+
+Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList; forward;
 
 Procedure GenerateReport(Report : TStringList, Filename : WideString);
 Var
@@ -90,7 +96,6 @@ Var
     Component          : ISch_Component;
     ImplIterator       : ISch_Iterator;
     SchImplementation  : ISch_Implementation;
-    MatchFPMImpl       : ISch_Implementation;
     ModelDataFile      : ISch_ModelDatafileLink;
     CompSrcLibName     : WideString;
     CompDBTable        : WideString;
@@ -100,8 +105,7 @@ Var
 
     FPCount            : Integer;
     FLinkCount         : Integer;
-    FPDeleted          : Boolean;
-
+    
 Begin
  
     FLinkCount := 0;
@@ -125,7 +129,7 @@ Begin
     Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
 
     Modelslist := TStringList.Create;
-    ModelsList.Add    (' Matching All Existing FP : ' + '  for libpath removal/deleting. ');
+    ModelsList.Add    (' All Existing FP models: ' + '  for libpath removal/deleting. ');
     ModelsList.Add('');
 
     Try
@@ -179,7 +183,7 @@ Begin
                         if ModelDataFile <> nil then
                             ModelDataFile.Location := '';       // == Any   in FP model dialog
 
-                        ModelsList.Add    ('     Deleted FP model lib path link for : ' + SchImplementation.ModelName);
+                        ModelsList.Add    ('     Deleted FP model lib path for the link : ' + SchImplementation.ModelName);
 
                         Inc(FLinkCount);
                     end;
@@ -217,15 +221,10 @@ Var
     Component          : ISch_Component;
     ImplIterator       : ISch_Iterator;
     SchImplementation  : ISch_Implementation;
-    MatchFPMImpl       : ISch_Implementation;
-    ModelDataFile      : ISch_ModelDatafileLink;
-    MatchOldFP         : Boolean;
     FPCount            : Integer;
     FLinkCount         : Integer;
-    FPDeleted          : Boolean;
-
+    
 Begin
- 
     FLinkCount := 0;
 
     If SchServer = Nil Then Exit;
@@ -244,11 +243,11 @@ Begin
 
     dConfirm := ConfirmNoYesWithCaption('Ready to Remove ALL footprint models ','Do you really want to do this ? ');
     if not dconfirm then exit;
-    dConfirm := ConfirmNoYesWithCaption('Remove ALL footprint models from components ','Very sure ? ');
+    dConfirm := ConfirmNoYesWithCaption('Remove ALL footprint model datafile links from components ','Very sure ? ');
     if not dconfirm then exit;
 
     Modelslist := TStringList.Create;
-    ModelsList.Add    (' Matching All Existing FP : ' + '  for datafile like removal/deleting. ');
+    ModelsList.Add    (' All Existing FP models : ' + '  for datafile like removal/deleting. ');
     ModelsList.Add('');
     
     Try
@@ -257,7 +256,6 @@ Begin
         While Component <> Nil Do
         Begin
             ModelsList.Add (' Comp LibRef : ' + Component.LibReference);
-            MatchOldFP := False;
             FPCount := 0;
 
             ImplIterator := Component.SchIterator_Create;
@@ -272,12 +270,12 @@ Begin
                         Inc(FPCount);
 
 //      remove all existing footprint models
-                        MatchFPMImpl := SchImplementation;
-                        MatchFPMImpl.ClearAllDatafileLinks;
-                        ModelsList.Add    ('     Deleted Existing model datafile link : ' + MatchFPMImpl.ModelName);
+                        SchImplementation.ClearAllDatafileLinks;
+                        ModelsList.Add    ('     Deleted Existing model datafile link : ' + SchImplementation.ModelName);
 
                         Inc(FLinkCount);
                     End;
+
                     SchImplementation := ImplIterator.NextSchObject;
                 End;
             Finally
@@ -304,4 +302,152 @@ Begin
 
 End;
 
+Procedure TotallyWipeoutMyComponentsToSymbols;
+Var
+    CurrentLib         : ISch_Lib;
+    Iterator           : ISch_Iterator;
+    Component          : ISch_Component;
+    ImplIterator       : ISch_Iterator;
+    Parameter          : ISch_Parameter;
+    ParasList          : TList;
+    SchImplementation  : ISch_Implementation;
+    FPCount            : Integer;
+    FLinkCount         : Integer;
+    I                  : integer;
+
+Begin
+    FLinkCount := 0;
+
+    If SchServer = Nil Then Exit;
+    CurrentLib := SchServer.GetCurrentSchDocument;
+    If CurrentLib = Nil Then Exit;
+
+    If (CurrentLib.ObjectID <> eSchLib) Then
+    Begin
+         ShowError('Operates on SchLib only.');
+         Exit;
+    End;
+//    If PcbServer = Nil then Exit;
+
+    Iterator := CurrentLib.SchLibIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+
+    dConfirm := ConfirmNoYesWithCaption('Ready to Totally Remove ALL models ','Do you really want to do this ? ');
+    if not dconfirm then exit;
+    dConfirm := ConfirmNoYesWithCaption('Totally Eliminate/Remove ALL models from components (make into symbols) ','Very sure ? ');
+    if not dconfirm then exit;
+
+    Modelslist := TStringList.Create;
+    ModelsList.Add    (' All Existing FP : ' + '  for datafile like removal/deleting. ');
+    ModelsList.Add('');
+    
+    Component := Iterator.FirstSchObject;
+
+    While Component <> Nil Do
+    Begin
+            ModelsList.Add (' Comp LibRef : ' + Component.LibReference);
+            FPCount := 0;
+
+            Component.ComponentDescription := 'SYM';
+            Component.Comment.Text := Component.LibReference;
+
+            ParasList := GetAllSchCompParameters(Component);
+            for i := 0 to (ParasList.Count - 1) do
+            begin
+                Parameter := ParasList.Items(i);
+                if Parameter.Name = 'Comment' then continue;
+                Component.Remove_Parameter(Parameter);
+                Component.RemoveSchObject(Parameter);
+                CurrentLib.UnRegisterSchObjectFromContainer(Parameter);
+                CurrentLib.RemoveSchObject(Parameter);
+//                SchServer.DestroySchObject(Parameter);
+            end;
+            ParasList.Free;
+
+
+            ImplIterator := Component.SchIterator_Create;
+            ImplIterator.AddFilter_ObjectSet(MkSet(eImplementation, eImplementationMap, eImplementationsList));
+
+                SchImplementation := ImplIterator.FirstSchObject;
+                While SchImplementation <> Nil Do
+                Begin
+                    Inc(FPCount);
+
+                    ParasList := GetAllSchCompParameters(SchImplementation);
+                    for i := 0 to (ParasList.Count - 1) do
+                    begin
+                        Parameter := ParasList.Items(i);
+//                      if Parameter.Name = 'Comment' then continue;
+                        SchImplementation.Remove_Parameter(Parameter);
+                        SchImplementation.RemoveSchObject(Parameter);
+                        CurrentLib.UnRegisterSchObjectFromContainer(Parameter);
+                        CurrentLib.RemoveSchObject(Parameter);
+//                SchServer.DestroySchObject(Parameter);
+                    end;
+                    ParasList.Free;
+
+
+//      remove all existing footprint models
+                   if SchImplementation.ObjectID = eImplementation then
+                   begin
+                       ModelsList.Add    ('     Deleted Existing model datafile link : ' + SchImplementation.ModelName);
+                       SchImplementation.ClearAllDatafileLinks;
+                   end;
+
+                   Inc(FLinkCount);
+
+// danger this completely removes the models.
+                    Component.RemoveSchImplementation(SchImplementation);
+                    Component.RemoveSchObject(SchImplementation);
+                    CurrentLib.UnRegisterSchObjectFromContainer(SchImplementation);
+                    CurrentLib.RemoveSchObject(SchImplementation);
+//                    SchServer.DestroySchObject(SchImplementation);
+
+                    SchImplementation := ImplIterator.NextSchObject;
+
+                End;
+                Component.SchIterator_Destroy(ImplIterator);
+
+            ModelsList.Add('');
+//            // Send a system notification that component change in the library.
+//            SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_EndModify, c_NoEventData);
+
+        Component.GraphicallyInvalidate;
+        Component := Iterator.NextSchObject;
+    End;
+
+    Component := Iterator.FirstSchObject;
+    CurrentLib.SetState_Current_SchComponent(Component);
+
+ //  Refresh library.
+    CurrentLib.GraphicallyInvalidate;
+    CurrentLib.SchIterator_Destroy(Iterator);
+    CurrentLib.UpdateDisplayForCurrentSheet;
+
+    SetDocumentDirty(true);
+    ModelsList.Insert(0, 'Count of FP Model totally removed/deleted : ' + IntToStr(FLinkCount));
+    GenerateReport(ModelsList, 'DataFileLinksRemovedFromCompLib.txt');
+    Modelslist.Free;
+
+End;
+
+Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList;
+Var
+   PIterator : ISch_Iterator;
+   Parameter : ISch_Parameter;
+Begin
+    Result := TList.Create;
+//    Result.OwnsObjects := false;
+    PIterator := Component.SchIterator_Create;
+    PIterator.AddFilter_ObjectSet(MkSet(eParameter) );
+    PIterator.SetState_IterationDepth(eIterateAllLevels);
+
+    Parameter := PIterator.FirstSchObject;
+    while Parameter <> Nil Do
+    begin
+        Result.Add(Parameter);
+        Parameter := PIterator.NextSchObject;
+    End;
+    Component.SchIterator_Destroy( PIterator );
+End;
 
