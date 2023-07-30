@@ -5,7 +5,7 @@ Run CleanNets() for all connection objects.
 Sometimes moving rooms & groups of components leaves unresolved
 connections (rubberbands)
 
-<SHIFT>  move locked components
+<SHIFT>  move locked components, move if other end is NOT a CMP
 <CTRL>   extended selection: leave moved FP selected, allow group move.
 
 <ALT>   is not available with ChooseLocation()   check this is consistent AD17 & AD21
@@ -15,6 +15,7 @@ B. Miller
 04/09/2019 : v0.2  Fix modifying Connections inside iterator loop!
 29/07/2022 : v0.21 fix modifier keys & add "locked" support.
 2023-07-19 : v0.22 fix TCoord maths problems.
+2023-07-30 : v0.23 allow <SHIFT> to move CMP connected to non-comp net (via, region etc)
 }
 const
     cESC      =-1;
@@ -130,6 +131,7 @@ begin
     NetList.Free;
 end;
 
+// spatial does not work on group primitives.
 function GetComponentAtXY(ObjectSet : TObjectSet, const X, const Y : TCoord) : IPCB_Component;
 var
     SIterator  : IPCB_SpatialIterator;
@@ -210,8 +212,7 @@ begin
     if SMag2 > SMag1 then Result := FP2;
 end;
 
-
-Procedure LassoCompByConnections;
+Procedure LassoCMPsByConnection;
 var
     Connect     : IPCB_Connection;
     Iterator    : IPCB_BoardIterator;
@@ -288,7 +289,8 @@ begin
 
             FP1 := GetComponentAtXY(MkSet(ePadObject), Connect.X1, Connect.Y1);
             FP2 := GetComponentAtXY(MkSet(ePadObject), Connect.X2, Connect.Y2);
-
+            
+            
             NM1 := 'no FP'; NM2 := NM1;
             if FP1 <> nil then NM1 := FP1.Name.Text;
             if FP2 <> nil then NM2 := FP2.Name.Text;
@@ -301,26 +303,35 @@ begin
             FP2Inside := false;
             if FP2 <> nil then
                 Fp2Inside := TestInsideBoard(FP2);
-// in Board
-            if (FP1 = nil) and (not FP2Inside) then
-                MoveCompToXY(FP2, x, y)
-            else if (FP2 = nil) and (not FP1Inside) then
-                MoveCompToXY(FP1, x, y)
-            else if FP1Inside and (not FP2Inside) then
-                MoveCompToXY(FP2, x, y)
-            else if (not FP1Inside) and FP2Inside then
-                MoveCompToXY(FP1, x, y)
+
+// only one is CMP FP
+            if Not (FP1 <> nil) then
+            if (FP2 <> nil) and ((not FP2Inside) or ShiftKeyDown) then
+                MoveCompToXY(FP2, x, y);
+
+            if Not(FP2 <> nil) then
+            if (FP1 <> nil) and ((not FP1Inside) or ShiftKeyDown) then
+                MoveCompToXY(FP1, x, y);
+
+            if (FP1 <> nil) and (FP2 <> nil) then
+            begin
+                if FP1Inside and (not FP2Inside) then
+                    MoveCompToXY(FP2, x, y);
+                if (not FP1Inside) and FP2Inside then
+                    MoveCompToXY(FP1, x, y);
 // both in or both out, find not closest
-            else if (not FP1Inside) and (not FP2Inside) then
-            begin
-                Prim := GreaterMagnitude(FP1, FP2, x,y);
-                MoveCompToXY(Prim, x, y);
-            end
-            else if (FP1Inside and FP2Inside) then
-            begin
-                Prim := GreaterMagnitude(FP1, FP2, x,y);
-                MoveCompToXY(Prim, x, y);
+                if (not FP1Inside) and (not FP2Inside) then
+                begin
+                    Prim := GreaterMagnitude(FP1, FP2, x,y);
+                    MoveCompToXY(Prim, x, y);
+                end;
+                if (FP1Inside and FP2Inside) then
+                begin
+                    Prim := GreaterMagnitude(FP1, FP2, x,y);
+                    MoveCompToXY(Prim, x, y);
+                end;
             end;
+
         end
         else
             DoAgain := false;
