@@ -25,8 +25,6 @@
          Scope1 = OnLayer('Internal Plane 1') and  IsRegion and InNet('GND')
          Scope2 = Net = 'NewNet'
        Make region cutouts around pad/via to pass DRC.
-         User need to trigger redraw by double clicking splitplane.
-         TBD: refresh the plane "pour"
 
    CreateBlindViaPlanePads
        tbd..
@@ -39,7 +37,7 @@
  2023-07-13  v0.31 make "anti-region"s on plane layers
  2023-07-14  v0.32 copy selected poly & Splitplanes to Plane & Signal layers.
  2023-08-04  v0.33 allow region (copper) copy to Plane
- 2023-08-06  v0.34 add DRC check for nets & SplitPlanes
+ 2023-08-06  v0.35 add DRC check for nets & SplitPlanes, fix SplitPlane refresh
 
 Anti-Regions allows removal of split lines in AD17.
 The built-in Poly grow function is NOT very robust, better with simple shape geometry.
@@ -110,7 +108,7 @@ begin
     MLayerStack := Board.MasterLayerStack;
     UnionIndex := GetHashID_ForString(GetWorkSpace.DM_GenerateUniqueID);
 
-    ReportLog := TstringList.Create;
+    ReportLog := TStringList.Create;
     Board.BeginModify;
 
     PLayerSet := LayerSetUtils.EmptySet;
@@ -157,7 +155,6 @@ begin
             end;
 
             SplitPlane.GraphicallyInvalidate;
-//            SplitPlane.Rebuild;
         end;
         Board.InvalidatePlane(PLayer);
         Board.RebuildSplitBoardRegions(false);
@@ -168,6 +165,7 @@ begin
     Board.BoardIterator_Destroy(Iter);
     Board.EndModify;
     Board.RebuildSplitBoardRegions(true);
+    Board.ValidateInvalidPlanes;
     ReportLog.Free;
 end;
 
@@ -385,6 +383,7 @@ begin
     Board.EndModify;
     Board.GraphicallyInvalidate;
     Board.RebuildSplitBoardRegions(false);
+    Board.ValidateInvalidPlanes;
 end;
 
 procedure CopyPlaneToNewPolySignalLayer;
@@ -521,7 +520,7 @@ begin
     MLayer := LayerUtils.MechanicalLayer(cTempMechLayer1);
     PObjSet := MkSet(eSplitPlaneObject);
 
-    ReportLog := TstringList.Create;
+    ReportLog := TStringList.Create;
     PlaneIndex := 0;
 
     LayerObj := MLayerStack.First(eLayerClass_InternalPlane);
@@ -581,6 +580,10 @@ begin
 
         LayerObj := MLayerStack.Next(eLayerClass_InternalPlane, LayerObj);
     end;
+    Board.RebuildSplitBoardRegions(true);
+    Board.ValidateInvalidPlanes;
+    Board.GraphicallyInvalidate;
+    Board.ViewManager_FullUpdate;
 end;
 
 procedure CreateMechLayerPlaneCopy;
@@ -708,52 +711,6 @@ begin
 
         LayerObj := MLayerStack.Next(eLayerClass_InternalPlane, LayerObj);
     end;
-end;
-
-procedure PosPlaneExplore;
-var
-    Prim        : IPCB_Primitive;
-    Plane       : IPCB_InternalPlane;
-    SplitPlane  : IPCB_SplitPlane;
-    Layer       : TLayer;
-    MLayer      : TLayer;
-    IsPlane     : boolean;
-    GIter       : IPCB_GroupIterator;
-
-begin
-    Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then
-    Begin
-        ShowMessage('This is not a Pcb document');
-        Exit;
-    End;
-    BOrigin := Point(Board.XOrigin, Board.YOrigin);
-    MLayerStack := Board.MasterLayerStack;
-
-    ReportLog := TstringList.Create;
-    MLayer    := LayerUtils.MechanicalLayer(cTempMechLayer1);
-
-    if Board.SelectecObjectCount = 0 then exit;
-    Prim := Board.SelectecObject(0);
-
-    if Prim.ObjectId <> eSplitPlaneObject then exit;   // AD23: ??=21; AD17: eSplitPlanePolygon =1 eSplitPlaneObject =22
-    SplitPlane := Prim;
-
-    Layer := Board.CurrentLayer;
-    IsPlane  := LayerUtils.IsInternalPlaneLayer(Layer);
-    if not IsPlane then exit;
-
-    Plane := MLayerStack.LayerObject_V7(Layer);
-
-    GIter := SplitPlane.GroupIterator_Create;
-    Prim  := GIter.FirstPCBObject;
-    while Prim <> nil do
-    begin
-        Prim.GeometricPolygon;
-        // ContourCount, HoleCount, .IsHole
-        Prim := GIter.NextPCBObject;
-    end;
-    SplitPlane.GroupIterator_Destroy(GIter);
 end;
 
 procedure ReportPlaneNets;
@@ -925,8 +882,8 @@ Begin
 
     PCBServer.PostProcess;
 
-    Board.ValidateInvalidPlanes;
     Board.RebuildSplitBoardRegions(true);
+    Board.ValidateInvalidPlanes;
     Board.GraphicallyInvalidate;
     Board.ViewManager_FullUpdate;
 End;
@@ -1293,9 +1250,7 @@ Begin
         end;
     end;
 
-// do need to make copper region same as poly & add holes to that?
 // plane poly with region holes just get wiped out.. need make region cutouts.
-
 // add cutouts
     if (not IsPoly) and (not MainContour) then
     begin
