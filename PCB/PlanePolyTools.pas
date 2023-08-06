@@ -20,6 +20,17 @@
        To preserve the SplitPlane it must make an outline border,
        so create SplitPlane border with width of plane pull-back.
 
+   Make/DRCPlaneNetClearance
+       Apply Elect Clearance rules to SplitPlaneRegion & Nets with DRC Rule like:
+         Scope1 = OnLayer('Internal Plane 1') and  IsRegion and InNet('GND')
+         Scope2 = Net = 'NewNet'
+       Make region cutouts around pad/via to pass DRC.
+         User need to trigger redraw by double clicking splitplane.
+         TBD: refresh the plane "pour"
+
+   CreateBlindViaPlanePads
+       tbd..
+
  Author: BL Miller
  23/11/2022  v0.1  POC delete selected object.
  12/04/2023  v0.2  copy plane to mech layer (+ve)
@@ -28,6 +39,7 @@
  2023-07-13  v0.31 make "anti-region"s on plane layers
  2023-07-14  v0.32 copy selected poly & Splitplanes to Plane & Signal layers.
  2023-08-04  v0.33 allow region (copper) copy to Plane
+ 2023-08-06  v0.34 add DRC check for nets & SplitPlanes
 
 Anti-Regions allows removal of split lines in AD17.
 The built-in Poly grow function is NOT very robust, better with simple shape geometry.
@@ -36,7 +48,7 @@ The built-in Poly grow function is NOT very robust, better with simple shape geo
 //      eSplitPlaneObject   TSplitPlaneAdaptor child one Region
 
 tbd: sub-stacks
-     add polycuts on plane layers around via/pad to fix net clearances.
+tbd: Blind Via pads on plane layers.
 .............................................................................}
 const
    AutoRedrawOutlines = true;          // redraw all plane outlines.
@@ -44,9 +56,10 @@ const
    cLineWidth         = 2;
    cTextHeight        = 16;
    cTextWidth         = 4;
+   cNoNetName         = 'no-net';
 
-   cPlaneMechLayer    = 51;       // + 15 layer target mechlayer for all internal plane copy
-   cTempMechLayer1    = 102;       // temp scratchpad. creating region on plane layers is destructive.
+   cPlaneMechLayer    = 21;       // + 15 layer target mechlayer for all internal plane copy
+   cTempMechLayer1    = 32;       // temp scratchpad. creating region on plane layers is destructive.
 
 function GetSplitPlaneObjs(Layer : TLayer, const ObjSet : TObjectSet) : TObjectList; forward;
 function DrawPolyRegOutline(PolyRegion : IPCB_Region, Layer : TLayer, const LWidth : TCoord, const LText : WideString, const UIndex : integer) : TObjectList; forward;
@@ -55,6 +68,10 @@ function AddRegionToBoard2(PolyRegion : IPCB_Region, const Layer : TLayer, const
 function AddSplitPlaneToBoard(PolyRegion : IPCB_Region, const Layer : TLayer, const MainContour : boolean) : IPCB_SplitPlane; forward;
 function AddText(NewText : WideString; Location : TLocation, Layer : TLayer, UIndex : integer) : IPCB_Text;                   forward;
 function MaxBR(SBR, TBR : TCoordRect) : TCoordRect; forward;
+function CheckPrimClear(Board : IPCB_Board, Prim : IPCB_Primitive, SPL : IPCB_SplitPlane, const Violate : boolean) : TCoord;  forward;
+function AddMoreClear(Prim : IPCB_Primitive, Layer : TLayer, Expand : TCoord) : IPCB_Region;               forward;
+function MakeViolation(Rule : IPCB_Rule, Prim1 : IPCB_Primitive, Prim2 : IPCB_Primitive) : IPCB_Violation; forward;
+procedure PlaneNetClearances(const Make : boolean); forward;
 
 var
     Board       : IPCB_Board;
@@ -64,6 +81,215 @@ var
     V7_Layer    : TPCB_V7_Layer;
     ReportLog   : TStringList;
     BOrigin     : TCoordPoint;
+
+procedure MakePlaneNetClearance;
+begin
+    PlaneNetClearances(true);
+end;
+procedure DRCPlaneNetclearances;
+begin
+    PlaneNetClearances(false);
+end;
+
+procedure PlaneNetClearances(const Make : boolean);
+var
+    Iter           : IPCB_BoardIterator;
+    Prim           : IPCB_Primitive;
+    SplitPlane     : IPCB_SplitPlane;
+    SplitPList     : TObjectList;
+    NewRegion      : IPCB_Region;
+    UnionIndex     : Integer;
+
+    PObjSet        : TObjectSet;
+    PLayer     : TLayer;
+    I          : integer;
+    MoreClear  : TCoord;
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then exit;
+    MLayerStack := Board.MasterLayerStack;
+    UnionIndex := GetHashID_ForString(GetWorkSpace.DM_GenerateUniqueID);
+
+    ReportLog := TstringList.Create;
+    Board.BeginModify;
+
+    PLayerSet := LayerSetUtils.EmptySet;
+    PLayerSet.IncludeSignalLayers;
+    PLayerSet.IncludeInternalPlaneLayers;
+    PLayerSet.Include(eMultiLayer);
+    Iter := Board.BoardIterator_Create;
+
+    LayerObj := MLayerStack.First(eLayerClass_InternalPlane);
+    while LayerObj <> nil do
+    begin
+        V7_Layer   := LayerObj.V7_LayerID;
+        PLayer     := V7_Layer.ID;
+
+        PObjSet := MkSet(eSplitPlaneObject);
+        SplitPList := GetSplitPlaneObjs(PLayer, PObjSet);
+
+        for I := 0 to (SplitPList.Count) -1 do
+        begin
+            SplitPlane := SplitPList.Items(I);
+
+            Iter.AddFilter_ObjectSet(MkSet(eViaObject, ePadObject));
+            Iter.AddFilter_IPCB_LayerSet(PLayerSet);
+
+            Prim := Iter.FirstPCBObject;
+            while (Prim <> nil) do
+            begin
+                if Prim.ObjectID = ePadObject then
+                if Prim.Layer = eMultiLayer then
+                    MoreClear := CheckPrimClear(Board, Prim, SplitPlane, not Make);
+
+                if Prim.ObjectID = eViaObject then
+                if Prim.IntersectLayer(PLayer) then
+                    MoreClear := CheckPrimClear(Board, Prim, SplitPlane, not Make);
+
+                if Make and (MoreClear > 0) then
+                begin
+                    NewRegion := AddMoreClear(Prim, PLayer, MoreClear);
+                    NewRegion.UnionIndex := UnionIndex;
+                    Board.AddPCBObject(NewRegion);
+                end;
+
+                Prim := Iter.NextPCBObject;
+            end;
+
+            SplitPlane.GraphicallyInvalidate;
+//            SplitPlane.Rebuild;
+        end;
+        Board.InvalidatePlane(PLayer);
+        Board.RebuildSplitBoardRegions(false);
+
+        LayerObj := MLayerStack.Next(eLayerClass_InternalPlane, LayerObj);
+    end;
+
+    Board.BoardIterator_Destroy(Iter);
+    Board.EndModify;
+    Board.RebuildSplitBoardRegions(true);
+    ReportLog.Free;
+end;
+
+function AddMoreClear(Prim : IPCB_Primitive, Layer : TLayer, Expand : TCoord) : IPCB_Region;
+var
+    GPC       : IPCB_GeometricPolygon;
+begin
+    GPC    := PCBServer.PCBContourMaker.MakeContour(Prim, Expand, Layer);
+    Result := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+    Result.GeometricPolygon := GPC;
+    Result.SetState_Kind(eRegionKind_Cutout);
+    Result.Layer := Layer;
+end;
+
+// plane pour hard up to anti-pad so zero clearance is NOT a connection.
+// plane anti-pad is larger than "pad" by clearance, contour of pad on layer is the anti-pad.
+// reliefs (connection) seem part of pad/via, set by plane conn style rules, includes annular ring.
+function CheckPrimClear(Board : IPCB_Board, Prim : IPCB_Primitive, SPL : IPCB_SplitPlane, const Violate : boolean) : TCoord;
+var
+    SplitPlaneReg : IPCB_SplitPlaneRegion;
+    SPLReg        : IPCB_SplitPlaneRegion;
+    SPRGIter      : IPCB_GroupIterator;
+    PLayer        : TLayer;
+    Clearance     : TCoord;
+    MinClear      : TCoord;
+    Rule, Rule2   : IPCB_Rule;
+    PNet, PNet2   : IPCB_Net;
+    PPCClear      : TCoord;
+    Gap, Gap2     : TCoord;
+    Gap3, Gap4    : TCoord;
+    Violation     : IPCB_Violation;
+begin
+
+    Result := 0;
+    PLayer := SPL.Layer;
+    PNet   := SPL.Net;
+    PNet2  := Prim.Net;
+    PPCClear := Prim.PowerPlaneClearance;
+
+    SPRGIter := SPL.GroupIterator_Create;
+    SPRGIter.AddFilter_IPCB_LayerSet(MkSet(SPL.Layer));
+    SPRGIter.AddFilter_ObjectSet(MkSet(eRegionObject));
+    SPLReg := SPRGIter.FirstPCBObject;
+
+// MinClear = 0 does NOT mean connection as to the anti-pad!!
+    MinClear := kMaxCoord;
+    while SPLReg <> nil do
+    begin
+        Clearance := Board.PrimPrimDistance(SPLReg, Prim);
+        if Clearance < MinClear then
+            SplitPlaneReg := SPLReg;
+
+        MinClear := Min(MinClear, Clearance);
+        SPLReg := SPRGIter.NextPCBObject;
+    end;
+    SPL.GroupIterator_Destroy(SPRGIter);
+
+// if same net then ignore as would be connected with relief structure.
+    if MinClear = 0 then
+    if PNet.UniqueId = PNet2.UniqueId then exit;
+
+// recalc actual clearance with pad size on layer & holesize
+// but that only work with simple round shape!
+//    MinClear := (Prim.SizeOnLayer(PLayer) - Prim.HoleSize) /2;
+    MinClear := MinClear + PPCClear;
+
+    Gap  := MinClear;
+    Gap2 := 0;
+    Gap3 := 0;
+    Gap4 := 0;
+    PNet.Name;
+    Prim.ObjectId;
+    PNet2.Name;
+    CoordToMils(MinClear);
+
+// this is the default clearance to plated barrel/hole for antipads no connection.
+    Rule := Board.FindDominantRuleForObjectPair(SPL, Prim, eRule_PowerPlaneClearance);
+    if Rule <> nil then
+    begin
+        Gap2 := Rule.Clearance;
+        if Rule.Enabled and Violate and (Gap2 > MinClear) then
+        begin
+            Violation := MakeViolation(Rule, SplitPlaneReg, Prim);
+            if Violation <> nil then
+                Board.AddPCBObject(Violation);
+        end;
+    end;
+    Gap := Max(Gap, Gap2);
+
+    Rule := Board.FindDominantRuleForObjectPair(SplitPlaneReg, Prim, eRule_Clearance);
+    if Rule <> nil then
+    begin
+        Gap3 := Rule.GetClearance(SplitPlaneReg, Prim);
+        if PNet.UniqueId = PNet2.UniqueId then Gap3 := 0;
+        if Rule.Enabled and Violate and (Gap3 > MinClear) then
+        begin
+            Violation := MakeViolation(Rule, SplitPlaneReg, Prim);
+            if Violation <> nil then
+                Board.AddPCBObject(Violation);
+        end;
+    end;
+    Gap := Max(Gap, Gap3);
+
+    Gap := Gap - MinClear;
+    if Gap > 0 then
+        Result := Gap;
+end;
+
+function MakeViolation(Rule : IPCB_Rule, Prim1 : IPCB_Primitive, Prim2 : IPCB_Primitive) : IPCB_Violation;
+var
+    ViolDesc : Widestring;
+    ViolName : WideString;
+begin
+    Result := Rule.ActualCheck(Prim1, Prim2);     // do NOT need to test reverse !
+    if Result <> nil then
+    begin
+        Prim1.SetState_DRCError(true);
+        Prim2.SetState_DRCError(true);
+        Prim1.GraphicallyInvalidate;
+        Prim2.GraphicallyInvalidate;
+    end;
+end;
 
 procedure CopyPlanePolyPlane;
 var
@@ -113,7 +339,7 @@ begin
     begin
         NewPoly := AddPolygonToBoard2(Prim, CLayer, true);
         NewPoly.BeginModify;
-        NetName := 'no-net';
+        NetName := cNoNetName;
         ANet := Prim.Net;       // .InNet DNW
         if ANet <> nil then
         begin
@@ -158,6 +384,7 @@ begin
 
     Board.EndModify;
     Board.GraphicallyInvalidate;
+    Board.RebuildSplitBoardRegions(false);
 end;
 
 procedure CopyPlaneToNewPolySignalLayer;
@@ -224,7 +451,7 @@ begin
 
                     NewPoly := AddPolygonToBoard2(SplitPlane, SLayer, true);
                     NewPoly.BeginModify;
-                    NetName := 'no-net';
+                    NetName := cNoNetName;
                     PNet := SplitPlane.Net;     // .InNet DNW
                     if PNet <> nil then
                     begin
@@ -483,6 +710,52 @@ begin
     end;
 end;
 
+procedure PosPlaneExplore;
+var
+    Prim        : IPCB_Primitive;
+    Plane       : IPCB_InternalPlane;
+    SplitPlane  : IPCB_SplitPlane;
+    Layer       : TLayer;
+    MLayer      : TLayer;
+    IsPlane     : boolean;
+    GIter       : IPCB_GroupIterator;
+
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then
+    Begin
+        ShowMessage('This is not a Pcb document');
+        Exit;
+    End;
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);
+    MLayerStack := Board.MasterLayerStack;
+
+    ReportLog := TstringList.Create;
+    MLayer    := LayerUtils.MechanicalLayer(cTempMechLayer1);
+
+    if Board.SelectecObjectCount = 0 then exit;
+    Prim := Board.SelectecObject(0);
+
+    if Prim.ObjectId <> eSplitPlaneObject then exit;   // AD23: ??=21; AD17: eSplitPlanePolygon =1 eSplitPlaneObject =22
+    SplitPlane := Prim;
+
+    Layer := Board.CurrentLayer;
+    IsPlane  := LayerUtils.IsInternalPlaneLayer(Layer);
+    if not IsPlane then exit;
+
+    Plane := MLayerStack.LayerObject_V7(Layer);
+
+    GIter := SplitPlane.GroupIterator_Create;
+    Prim  := GIter.FirstPCBObject;
+    while Prim <> nil do
+    begin
+        Prim.GeometricPolygon;
+        // ContourCount, HoleCount, .IsHole
+        Prim := GIter.NextPCBObject;
+    end;
+    SplitPlane.GroupIterator_Destroy(GIter);
+end;
+
 procedure ReportPlaneNets;
 var
     BIter        : IPCB_BoardIterator;
@@ -653,6 +926,7 @@ Begin
     PCBServer.PostProcess;
 
     Board.ValidateInvalidPlanes;
+    Board.RebuildSplitBoardRegions(true);
     Board.GraphicallyInvalidate;
     Board.ViewManager_FullUpdate;
 End;
@@ -1026,11 +1300,13 @@ Begin
     if (not IsPoly) and (not MainContour) then
     begin
         GPC := PolyRegion.GeometricPolygon;
+
         for I := 0 to (GPC.Count - 1) do
         begin
             if GPC.IsHole(I) then
             begin
                 GPCVL := GPC.Contour(I);
+
                 NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
                 NewRegion.SetOutlineContour(GPCVL);
                 NewRegion.SetState_Kind(eRegionKind_Cutout);
@@ -1040,7 +1316,7 @@ Begin
         end;
     end;
 
-// add after regions? so plane redraw pours around them
+// add after regions so plane redraw pours around them
     Board.AddPCBObject(Result);
     Result.GraphicallyInvalidate;
     Board.InvalidatePlane(Layer);
