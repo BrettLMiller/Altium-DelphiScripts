@@ -67,8 +67,8 @@ begin
     if Path = 'True' then
     begin
         GetStringParameter('Path',   Path);
-        Path     := ExtractFilePath(Path);
         FileName := ExtractFileName(Path);
+        Path     := ExtractFilePath(Path);
 // Dialog FileSaveOpen Mode 2 & 4 not supported
 //        I := 1;
 //        repeat
@@ -528,7 +528,7 @@ Begin
 
     Filepath := Filepath + Filename;
 
-    ModelsList.Insert(0, ExtractFilename(Prj.DM_ProjectFullPath));
+    Report.Insert(0, ExtractFilename(Prj.DM_ProjectFullPath));
     Report.SaveToFile(Filepath);
 
     ReportDocument := Client.OpenDocument('Text',Filepath);
