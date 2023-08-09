@@ -3,11 +3,20 @@
   Operates on component symbols in SchDoc & SchLib
 
 Summary
-  Transfers existing Pin name info into Functions extension (AD20+)
-  AD20+: Loads Pin name & function info from text file.
-  AD17-AD19: Loads Pin Names
+RefreshSymbolFunctionFromName
+   Transfers existing Pin name info into Functions extension (AD20+)
 
-Trnasfer requires "/" char in Pin.Name before setting functions.
+LoadCMPSymbolPinNamesFromFile
+   AD20+: Loads Pin name & function info from text file.
+   AD17-AD19: Loads Pin Names
+
+CleanSymbolPinNames
+   Correct common format issues
+      'FN1_(FN2/FN3)' to 'FN1/FN2/FN3'
+      'FN1,FN2,FN3    to 'FN1/FN2/FN3'
+      & remove leading & trailing '/'
+   
+Transfer requires '/' char in Pin.Name before setting functions.
 
 Text File Format:
 <tab> delimited.
@@ -15,6 +24,7 @@ pin-des<tab>FN1<tab>FN2<LF>
 
 Author BL Miller
  2023-80-09 v0.1 POC
+ 2023-08-09 v0.2 add basic name cleaning for old symbols.
  .................................................................................}
 
 {..............................................................................}
@@ -22,6 +32,7 @@ const
     PinFuncFile  = 'PinFunctions.txt';   // not used..
     AD19VersionMajor  = 19;
     AD20VersionMajor  = 20;
+    cShowReport       = true;       // load show report file
 
 Var
     CurrentSheet : ISch_Document;
@@ -38,7 +49,7 @@ Procedure GenerateReport(Report : TStringList, Filename : WideString);  forward;
 Procedure SetDocumentDirty (Dummy : Boolean); forward;
 
 
-procedure LoadCMPSymbolPinNamesFromFile();
+procedure LoadCMPSymbolPinNamesFromFile;
 var
     Comp       : ISch_Component;
     Obj        : ISch_GraphicalObject;
@@ -315,6 +326,116 @@ Begin
     Symbolslist.Free;
 End;
 
+Procedure CleanSymbolPinNames;
+Var
+    CurrentSheet   : ISch_Document;
+    Iterator       : ISch_Iterator;
+    Component      : ISch_Component;
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    OldPinName     : WideString;
+    PinName        : WideString;
+    CmpCnt         : integer;
+    IsLib          : boolean;
+    CompSrcLibName : WideString;
+    CompDBTable    : WideString;
+    CompDesignId   : WideString;
+    CompLibRef     : WideString;
+    CompSymRef     : WideString;
+Begin
+
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+
+    VerMajor := Version(true).Strings(0);
+
+    Symbolslist := TStringList.Create;
+    SymbolsList.Add    (' All Comp Symbols: ' + ' clean Pin Names ');
+    SymbolsList.Add('');
+    CmpCnt :=0;
+    IsLib  := false;
+
+    If CurrentSheet.ObjectID = eSchLib Then
+    begin
+        IsLib := true;
+        Iterator := CurrentSheet.SchLibIterator_Create;
+    end else
+        Iterator := CurrentSheet.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+
+    Component := Iterator.FirstSchObject;
+    While Component <> Nil Do
+    Begin
+        inc(CmpCnt);
+        CompDesignId   := Component.DesignItemId;
+        CompLibRef     := Component.LibReference;
+
+        SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
+
+        if not IsLib then
+            SymbolsList.Add (Component.Designator.Text + ' Comp DesignID : ' + CompDesignId)
+        else
+            SymbolsList.Add (' Comp LibRef : ' + CompLibRef);
+
+        SymbolsList.Add(' Cleaned Pin Designator & Old & New Name');
+
+        PinIterator := Component.SchIterator_Create;
+        PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+
+        Pin := PinIterator.FirstSchObject;
+        While Pin <> Nil Do
+        Begin
+            PinName    := Pin.Name;
+            OldPinName := PinName;
+// ','  --> '/'
+            PinName := ReplaceText(PinName, ',', '/');
+// '_(' --> '/'  and ')_' --> '/'
+            PinName := ReplaceText(PinName, '_(', '/');
+            PinName := ReplaceText(PinName, ')_', '/');
+// '(' --> '/'  and ')' --> '/'
+            PinName := ReplaceText(PinName, '(', '/');
+            PinName := ReplaceText(PinName, ')', '/');
+// '//' to '/'
+            PinName := ReplaceText(PinName, '///', '/');
+            PinName := ReplaceText(PinName, '//', '/');
+
+            if (ansipos('/', PinName) = 1) then
+                PinName := Copy(PinName, 2, 256);
+            if AnsiEndsStr('/', PinName) then
+                PinName := Copy(PinName, 1, Length(PinName) - 1);
+
+            Pin.SetState_Name(PinName);
+            Pin.GraphicallyInvalidate;
+            SymbolsList.Add ('  ' + Pin.Designator + '|' + OldPinName + '|' + PinName);
+
+            Pin := PinIterator.NextSchObject;
+        End;
+
+        Component.SchIterator_Destroy(PinIterator);
+
+        SymbolsList.Add('');
+        SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_EndModify, c_NoEventData);
+
+        Component := Iterator.NextSchObject;
+    End;
+
+    // Refresh library.
+    CurrentSheet.GraphicallyInvalidate;
+    CurrentSheet.SchIterator_Destroy(Iterator);
+
+    SetDocumentDirty(true);
+    SymbolsList.Insert(0, 'Count of CMP SYM pin names cleaned : ' + IntToStr(CmpCnt));
+    GenerateReport(SymbolsList, 'SYMPinNameClean.txt');
+    Symbolslist.Free;
+End;
+
 {..............................................................................}
 Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList;
 Var
@@ -405,6 +526,7 @@ Begin
     Report.Insert(0, ExtractFilename(Prj.DM_ProjectFullPath));
     Report.SaveToFile(Filepath);
 
+    if not cShowReport then exit;
     ReportDocument := Client.OpenDocument('Text',Filepath);
     If ReportDocument <> Nil Then
     begin
