@@ -7,6 +7,8 @@ Summary
   AD20+: Loads Pin name & function info from text file.
   AD17-AD19: Loads Pin Names
 
+Trnasfer requires "/" char in Pin.Name before setting functions.
+
 Text File Format:
 <tab> delimited.
 pin-des<tab>FN1<tab>FN2<LF>
@@ -143,20 +145,37 @@ end;
 
 procedure ProcessCompPinFunctions(Comp : ISch_Component);
 var
-    PinList      : TList;
-    Pin          : ISch_Pin;
-    PinFuncLine  : TStringList;
-    PinNumber    : WideString;
-    PinFunc      : WideString;
-    I, J, K      : integer;
+    PinList        : TList;
+    Pin            : ISch_Pin;
+    PinFuncLine    : TStringList;
+    PinNumber      : WideString;
+    PinFunc        : WideString;
+    I, J, K        : integer;
+    CompSrcLibName : WideString;
+    CompDBTable    : WideString;
+    CompDesignId   : WideString;
+    CompLibRef     : WideString;
+    CompSymRef     : WideString;
 
 begin
+    CompSrcLibName := Comp.SourceLibraryName;
+    CompDBTable    := Comp.DatabaseTableName;
+    CompDesignId   := Comp.DesignItemId;
+    CompLibRef     := Comp.LibReference;
+    CompSymRef     := Comp.SymbolReference;
+
     PinFuncLine := TStringList.Create;
     PinFuncLine.Delimiter := #9;
     PinFuncLine.StrictDelimiter := true;
 
     PinList := GetAllCompPins(Comp);
     SchServer.RobotManager.SendMessage(Comp.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
+
+    if not IsLib then
+        SymbolsList.Add (Comp.Designator.Text + ' Comp DesignID : ' + CompDesignId + '   ExCompSrcLib : ' + CompSrcLibName + '   ExSymRef : ' + CompSymRef)
+    else
+        SymbolsList.Add (' Comp LibRef : ' + CompLibRef + '   ExCompSrcLib : ' + CompSrcLibName);
+    SymbolsList.Add(' Refreshed Func. for Pin Designator & Name');
 
     for I := 0 to (PinList.Count - 1) do
     begin
@@ -186,7 +205,8 @@ begin
                 if VerMajor >= AD20VersionMajor then
                     Pin.SetState_FunctionsFromName;
 
-                SymbolsList.Add    ('     Refreshed Pin func : ' + Pin.Designator + '|' + Pin.Name);
+                SymbolsList.Add ('  ' + Pin.Designator + '|' + Pin.Name);
+
                 Pin.GraphicallyInvalidate;
             end;
         end;
@@ -200,18 +220,18 @@ end;
 {..............................................................................}
 Procedure RefreshSymbolFunctionFromName;
 Var
-    CurrentSheet       : ISch_Document;
-    Iterator           : ISch_Iterator;
-    Component          : ISch_Component;
-    Pin                : ISch_Pin;
-    PinIterator        : ISch_Iterator;
-    CmpCnt             : integer;
-    IsLib              : boolean;
-    CompSrcLibName     : WideString;
-    CompDBTable        : WideString;
-    CompDesignId       : WideString;
-    CompLibRef         : WideString;
-    CompSymRef         : WideString;
+    CurrentSheet   : ISch_Document;
+    Iterator       : ISch_Iterator;
+    Component      : ISch_Component;
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    CmpCnt         : integer;
+    IsLib          : boolean;
+    CompSrcLibName : WideString;
+    CompDBTable    : WideString;
+    CompDesignId   : WideString;
+    CompLibRef     : WideString;
+    CompSymRef     : WideString;
 Begin
 
     If SchServer = Nil Then Exit;
@@ -266,13 +286,13 @@ Begin
         While Pin <> Nil Do
         Begin
             If Pin.Name <> '' then
-            if ansipos('/', Pin.Name) > 1 then
+            if (ansipos('/', Pin.Name) > 1) then
             Begin
                 if VerMajor >= AD20VersionMajor then
                     Pin.SetState_FunctionsFromName;
 
                 Pin.GraphicallyInvalidate;
-                SymbolsList.Add    ('     Refreshed Pin func : ' + Pin.Designator + '|' + Pin.Name);
+                SymbolsList.Add ('  ' + Pin.Designator + '|' + Pin.Name);
             end;
             Pin := PinIterator.NextSchObject;
         End;
