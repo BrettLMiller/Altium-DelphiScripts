@@ -2,6 +2,8 @@
 # <tab> delimited.
 # pin-des	FN1	FN2 
 
+24	
+25	 	 N 	
 26	RE3	MCLR	VPP
 25	RB7	ICSPDAT
 24	RB6	ICSPCLK
