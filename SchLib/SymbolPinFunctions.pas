@@ -1,6 +1,6 @@
 { SymbolPinFunctions.pas
 
-  Operates on component symbols in SchDoc & SchLib
+  Operates on component symbol(s) in SchDoc & SchLib
 
 Summary
 RefreshAllSymbolFunctionFromName : All
@@ -8,8 +8,11 @@ RefreshOneCMPSymbolPinFunctions  : one picked or current CMP
    Transfers existing Pin name info into Functions extension (AD20+)
 
 LoadCMPSymbolPinNamesFromFile
-   AD20+: Loads Pin name & function info from text file.
+LoadCMPSymbolPinNamesFromClipBoard
+   AD20+: Loads Pin name & function info from text file or clipboard.
    AD17-AD19: Loads Pin Names
+   parses clipboard same as the text file
+   Can make the PinName in file or clipboard be '24<tab>FN1,FN2,FN3' & then run Clean..
 
 CleanAllSymbolPinNames           : All
 CleanOneCMPSymbolPinNames        :  one picked or current CMP
@@ -18,8 +21,15 @@ CleanOneCMPSymbolPinNames        :  one picked or current CMP
       'FN1,FN2,FN3    to 'FN1/FN2/FN3'
       & remove any leading & trailing '/' & <space>
 
+RemoveForwardSlashOneCMPSymbolPinNames
+   Correct incorrect use of forward slash in existing names
+
+NegationPADsToAltiumOneCMPSymbolPinNames
+   Convert sensible text negation format \PADs\ to clumsy A\l\t\i\u\m\ or \Altium format
+
 Transfer requires '/' char in Pin.Name before setting functions.
 User can paste in CSV delimited text & run Clean.. & then Refresh...
+
 Text File Format:
 <tab> delimited.
 pin-des<tab>FN1<tab>FN2<LF>
@@ -31,6 +41,7 @@ Author BL Miller
  2023-80-09 v0.10  POC
  2023-08-09 v0.20  add basic name cleaning for old symbols.
  2023-08-10 v0.21  Separate string processing for AD17-19 (make AD20+ safer); All & single CMP.
+ 2023-08-11 v0.22  Support Copy/"paste" thru clipboard, Single symbol text processing helper functions
  .............................................................................................
 
 Convert CSV text to slashes & apply as pin functions (single pin clicking).
@@ -56,6 +67,9 @@ function PickAComp(const Sheet : ISch_Document, IsLib : boolean) : ISch_Graphica
 Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList; forward;
 function GetAllCompPins(Comp : ISch_Component) : TList; forward;
 function RefreshCompSymbolPinFunc(Component) : boolean; forward;
+function RemoveFSCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
+function NegationChangePTA(Component : ISch_Component) : boolean; forward;
+function ImportClipBoard(const dummy : boolean) : TStringList; forward;
 function CleanCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
 function CleanPinName(Name : WideString) : WideString;  forward;
 function CleanPinName17(Name : WideString) : WideString;  forward;
@@ -142,6 +156,61 @@ begin
     SymbolsList.Free;
 end;
 
+procedure LoadCMPSymbolPinNamesFromClipBoard;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := Version(true).Strings(0);
+
+    Symbolslist := TStringList.Create;
+    SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
+    SymbolsList.Add ('Updated Name & Functions for Comp SYM from clipboard : ');
+    SymbolsList.Add ('');
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        PinFuncList := ImportClipBoard(true);
+        ProcessCompPinFunctions(Comp);
+        Comp.GraphicallyInvalidate;
+    end;
+
+    PinFuncList.Free;
+
+    GenerateReport(SymbolsList, 'LoadPinNameFuncFromClipboard.txt');
+    SymbolsList.Free;
+end;
+
+function ImportClipBoard(const dummy : boolean) : TStringList;
+var
+    ClipB         : TClipBoard;
+begin
+    Result := TStringList.Create;
+    Result.Delimiter := #10;
+    Result.StrictDelimiter := true;
+    ClipB := TClipboard.Create;
+    Result.DelimitedText := ClipB.AsText; // := StringReplace(Report.DelimitedText, #10, #13#10, rfReplaceAll);
+    ClipB.free;
+end;
+
 procedure CleanOneCMPSymbolPinNames;
 var
     Comp       : ISch_Component;
@@ -179,6 +248,78 @@ begin
     end;
 
     GenerateReport(SymbolsList, 'CleanCompSymbolPinNames.txt');
+    SymbolsList.Free;
+end;
+
+procedure RemoveForwardSlashOneCMPSymbolPinNames;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := Version(true).Strings(0);
+
+    Symbolslist := TStringList.Create;
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        RemoveFSCompSymbolPinNames(Comp);
+        Comp.GraphicallyInvalidate;
+    end;
+
+    SymbolsList.Free;
+end;
+
+procedure NegationPADsToAltiumOneCMPSymbolPinNames;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := Version(true).Strings(0);
+
+    Symbolslist := TStringList.Create;
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        NegationChangePTA(Comp);
+        Comp.GraphicallyInvalidate;
+    end;
+
     SymbolsList.Free;
 end;
 
@@ -246,6 +387,7 @@ Begin
          Exit;
     End;
 
+    BeginHourGlass(crHourGlass);
     VerMajor := Version(true).Strings(0);
 
     Symbolslist := TStringList.Create;
@@ -297,6 +439,7 @@ Begin
     SymbolsList.Insert(0, 'Count of CMP SYM refreshed : ' + IntToStr(CmpCnt));
     GenerateReport(SymbolsList, 'SYMPinFuncRefresh.txt');
     Symbolslist.Free;
+    EndHourGlass;
 End;
 
 Procedure CleanAllSymbolPinNames;
@@ -323,6 +466,7 @@ Begin
          Exit;
     End;
 
+    BeginHourGlass(crHourGlass);
     VerMajor := Version(true).Strings(0);
 
     Symbolslist := TStringList.Create;
@@ -370,6 +514,7 @@ Begin
     SymbolsList.Insert(0, 'Count of CMP SYM pin names cleaned : ' + IntToStr(CmpCnt));
     GenerateReport(SymbolsList, 'SYMPinNameClean.txt');
     Symbolslist.Free;
+    EndHourGlass;
 End;
 
 {..............................................................................}
@@ -452,11 +597,12 @@ begin
 // blank lines
             If PinFuncLine.Text = '' then continue;
 
-            PinNumber := PinFuncLine.Strings(0);
+            PinNumber := Trim(PinFuncLine.Strings(0));
+            if PinNumber = '' then continue;
 // comment
-            if PinNumber = '#' then continue;
+            if PinNumber[1] = '#' then continue;
 // space no desig.
-            if PinNumber = ' ' then continue;
+            if PinNumber[1] = ' ' then continue;
 
             if PinNumber = Pin.Designator then
             begin
@@ -544,6 +690,78 @@ begin
         Pin.SetState_Name(PinName);
         Pin.GraphicallyInvalidate;
         SymbolsList.Add ('  ' + Pin.Designator + '|' + OldPinName + '|' + PinName);
+
+        Pin := PinIterator.NextSchObject;
+    End;
+    Component.SchIterator_Destroy(PinIterator);
+end;
+{..............................................................................}
+function NegationChangePTA(Component : ISch_Component) : boolean;
+var
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    OldPinName     : WideString;
+    PinName        : WideString;
+    NON            : boolean;
+    I, Cnt         : integer;
+begin
+    Result := false;
+    PinIterator := Component.SchIterator_Create;
+    PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+
+    Pin := PinIterator.FirstSchObject;
+    While Pin <> Nil Do
+    Begin
+        OldPinName := Pin.Name;
+        PinName := OldPinName;
+        Cnt := 0;
+        for I := 1 to Length(OldPinName) do
+            if OldPinName[I] = '\' then inc(Cnt);
+
+        NON := false;
+        if (Cnt > 0) then
+        begin
+            PinName := '';
+            for I := 1 to Length(OldPinName) do
+            begin
+                if OldPinName[I] = '\' then
+                    NON := not (NON)
+                else
+                begin
+                    PinName := PinName + OldPinName[I];
+                    if NON then PinName := PinName + '\';
+                end;
+            end;
+        end;
+
+        Pin.SetState_Name(PinName);
+        Pin.GraphicallyInvalidate;
+        SymbolsList.Add ('  ' + Pin.Designator + '|' + OldPinName + '|' + PinName);
+
+        Pin := PinIterator.NextSchObject;
+    End;
+    Component.SchIterator_Destroy(PinIterator);
+end;
+{..............................................................................}
+function RemoveFSCompSymbolPinNames(Component : ISch_Component) : ISch_Pin;
+var
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    OldPinName     : WideString;
+    PinName        : WideString;
+begin
+    Result := nil;
+    PinIterator := Component.SchIterator_Create;
+    PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+
+    Pin := PinIterator.FirstSchObject;
+    While Pin <> Nil Do
+    Begin
+        OldPinName := Pin.Name;
+        PinName := StringReplace(OldPinName, '/', '', eReplaceOne);
+
+        Pin.SetState_Name(PinName);
+        Pin.GraphicallyInvalidate;
 
         Pin := PinIterator.NextSchObject;
     End;
