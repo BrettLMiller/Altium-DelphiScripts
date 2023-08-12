@@ -11,8 +11,7 @@ LoadCMPSymbolPinNamesFromFile
 LoadCMPSymbolPinNamesFromClipBoard
    AD20+: Loads Pin name & function info from text file or clipboard.
    AD17-AD19: Loads Pin Names
-   parses clipboard same as the text file
-   Can make the PinName in file or clipboard be '24<tab>FN1,FN2,FN3' & then run Clean..
+   Clipboard text can be comma or <tab> delimited.
 
 CleanAllSymbolPinNames           : All
 CleanOneCMPSymbolPinNames        :  one picked or current CMP
@@ -42,6 +41,7 @@ Author BL Miller
  2023-08-09 v0.20  add basic name cleaning for old symbols.
  2023-08-10 v0.21  Separate string processing for AD17-19 (make AD20+ safer); All & single CMP.
  2023-08-11 v0.22  Support Copy/"paste" thru clipboard, Single symbol text processing helper functions
+ 2023-08-12 v0.23  Support comma or <tab> delimited text in clipboard.
  .............................................................................................
 
 Convert CSV text to slashes & apply as pin functions (single pin clicking).
@@ -54,6 +54,7 @@ const
     AD19VersionMajor  = 19;
     AD20VersionMajor  = 20;
     cShowReport       = false;       // load show report file
+    cCommaToFSlash    = true;        // convert clipboard text commas to forward slash.
 
 Var
     CurrentSheet : ISch_Document;
@@ -185,6 +186,7 @@ begin
     SymbolsList.Add ('');
 
     Comp := PickAComp(CurrentSheet, IsLib);
+    ShowMessage('Prepare Clipboard ');
 
     if Comp <> nil then
     begin
@@ -197,18 +199,6 @@ begin
 
     GenerateReport(SymbolsList, 'LoadPinNameFuncFromClipboard.txt');
     SymbolsList.Free;
-end;
-
-function ImportClipBoard(const dummy : boolean) : TStringList;
-var
-    ClipB         : TClipBoard;
-begin
-    Result := TStringList.Create;
-    Result.Delimiter := #10;
-    Result.StrictDelimiter := true;
-    ClipB := TClipboard.Create;
-    Result.DelimitedText := ClipB.AsText; // := StringReplace(Report.DelimitedText, #10, #13#10, rfReplaceAll);
-    ClipB.free;
 end;
 
 procedure CleanOneCMPSymbolPinNames;
@@ -518,6 +508,32 @@ Begin
 End;
 
 {..............................................................................}
+function ImportClipBoard(const dummy : boolean) : TStringList;
+var
+    ClipB         : TClipBoard;
+    LI            : integer;
+    Line          : WideString;
+begin
+    Result := TStringList.Create;
+    Result.Delimiter := #10;
+    Result.StrictDelimiter := true;
+    ClipB := TClipboard.Create;
+    Result.DelimitedText := ClipB.AsText;
+    ClipB.free;
+
+    for LI := 0 to (Result.Count - 1) do
+    begin
+        Line := Result.Strings(LI);
+
+        if VerMajor >= AD20VersionMajor then
+            Line := ReplaceText(Line, ',', #9)
+        else
+            Line := StringReplace(Line, ',', #9, eReplaceOne);      //eReplaceOne == ALL!
+
+        Result.Strings(LI) := Line;
+    end;
+end;
+{..............................................................................}
 function PickAPin(const Sheet : ISch_Document) : ISch_GraphicalObject;
 var
     Obj        : ISch_GraphicalObject;
@@ -575,7 +591,7 @@ begin
     CompSymRef     := Comp.SymbolReference;
 
     PinFuncLine := TStringList.Create;
-    PinFuncLine.Delimiter := #9;
+    PinFuncLine.Delimiter := #9;   // <TAB>
     PinFuncLine.StrictDelimiter := true;
 
     PinList := GetAllCompPins(Comp);
@@ -812,11 +828,11 @@ begin
 // ','  --> '/'
     Result := ReplaceText(Result, ',', '/');
 // '_(' --> '/'  and ')_' --> '/'
-    Result := ReplaceText(Result, '_(', '/');
-    Result := ReplaceText(Result, ')_', '/');
+//    Result := ReplaceText(Result, '_(', '/');
+//    Result := ReplaceText(Result, ')_', '/');
 // '(' --> '/'  and ')' --> '/'
-    Result := ReplaceText(Result, '(', '/');
-    Result := ReplaceText(Result, ')', '/');
+//    Result := ReplaceText(Result, '(', '/');
+//    Result := ReplaceText(Result, ')', '/');
 // '//' to '/'
     Result := ReplaceText(Result, '///', '/');
     Result := ReplaceText(Result, '//', '/');
@@ -837,11 +853,11 @@ begin
 // ','  --> '/'
     Result := StringReplace(Result, ',', '/', eReplaceOne);      //eReplaceOne == ALL!
 // '_(' --> '/'  and ')_' --> '/'
-    Result := StringReplace(Result, '_(', '/', eReplaceOne);
-    Result := StringReplace(Result, ')_', '/', eReplaceOne);
+//    Result := StringReplace(Result, '_(', '/', eReplaceOne);
+//    Result := StringReplace(Result, ')_', '/', eReplaceOne);
 // '(' --> '/'  and ')' --> '/'
-    Result := StringReplace(Result, '(', '/', eReplaceOne);
-    Result := StringReplace(Result, ')', '/', eReplaceOne);
+//    Result := StringReplace(Result, '(', '/', eReplaceOne);
+//    Result := StringReplace(Result, ')', '/', eReplaceOne);
 // '//' to '/'
     Result := StringReplace(Result, '///', '/', eReplaceOne);
     Result := StringReplace(Result, '//' , '/', eReplaceOne);
