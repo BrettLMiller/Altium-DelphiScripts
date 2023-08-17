@@ -52,6 +52,7 @@ Notes:
  2023-06-17 1.51 Import: simple layername check for keyword to determine top or bottom
  2023-07-11 1.52 Attempt to minimise _V7 methods.
  2023-07-12 1.53 V7 methods eliminated for AD19+, Import: if unpair existing then rename to reduce keyword name confusion.
+ 2023-08-17 1.54 LO.LayerID DNW above i=16 MUST use LO.V7_LayerID.ID
 
   TMechanicalLayerToKindItem
 .............................................................................................
@@ -91,7 +92,7 @@ var
     MechLayerPairs    : IPCB_MechanicalLayerPairs;
     MechLayerPair     : TMechanicalLayerPair;       // IPCB_MechanicalLayerPairs.LayerPair(MechPairIdx)
     MechPairIdx       : integer;                    // index of above
-    VerMajor          : WideString;
+    VerMajor          : integer;
     MaxMechLayers     : integer;
     FileName      : String;
     FilePath      : String;
@@ -99,7 +100,6 @@ var
     Flag          : Integer;
     LegacyMLS     : boolean;
 
-function Version(const dummy : boolean) : TStringList;                      forward;
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;   forward;
 function LayerStrToPairKind(LPKS : WideString) : TMechanicalLayerPairKind;  forward;
 function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;            forward;
@@ -123,10 +123,10 @@ begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion); // Version(true).Strings(0);
 
     MaxMechLayers := AD17MaxMechLayers;
-    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    if VerMajor >= AD19VersionMajor then
     begin
         MaxMechLayers := AD19MaxMechLayers;
     end;
@@ -170,12 +170,12 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     bHasPairKinds := false;
-    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    if VerMajor >= AD19VersionMajor then
     begin
         LegacyMLS     := false;
         MaxMechLayers := AD19MaxMechLayers;
@@ -303,11 +303,11 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
-    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    if VerMajor >= AD19VersionMajor then
     begin
         MaxMechLayers := AD19MaxMechLayers;
         LegacyMLS     := false;
@@ -344,12 +344,10 @@ begin
             LayerName1 := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name', 'eMech' + IntToStr(i));
             MechLayer.Name := LayerName1;
 
-            for j := (i + 1) to MaxMechLayers do
+            for j := i to MaxMechLayers do
             begin
-                if i = j then continue;
-
                 ML2 := LayerUtils.MechanicalLayer(j);
-//        remove any pair including backwards ones !
+//        remove any pair including same layer & backwards ones !
                 if MechLayerPairs.PairDefined(ML2, ML1) then
                     MechLayerPairs.RemovePair(ML2, ML1);
                 if MechLayerPairs.PairDefined(ML1, ML2) then
@@ -395,6 +393,7 @@ begin
                 ML2 := slUsedLayerKinds.ValueFromIndex(j);
                 if ML2 <> ML1 then
                 begin
+                     k := 0;
                      MechLayer2 := GetMechLayerObjectFromLID7(LayerStack, k, ML2);
                      MechLayer2.Kind := NoMechLayerKind;
 //                 remove confusing name with reserved keywords.
@@ -437,7 +436,7 @@ begin
                 MechPairIdx := -1;
                 if (MPairLayer = LayerName2) and not MechLayerPairs.PairDefined(ML1, ML2) then
                 begin
-                    if (pos(ctTop, LayerName2) > 0)  and (pos(ctBottom, LayerName1) > 0) then
+                    if (Pos(ctTop, LayerName2) > 0)  and (Pos(ctBottom, LayerName1) > 0) then
                         MechPairIdx := MechLayerPairs.AddPair(ML2, ML1)
                     else
                         MechPairIdx := MechLayerPairs.AddPair(ML1, ML2);    // (i, j)       // index? to what FFS
@@ -495,12 +494,12 @@ begin
         Board := PCBLib.Board;
     if Board = nil then exit;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);   // Version(true).Strings(0);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     MLayerKind := NoMechLayerKind;
-    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    if VerMajor >= AD19VersionMajor then
     begin
         MaxMechLayers := AD19MaxMechLayers;
         LegacyMLS     := false;
@@ -624,7 +623,7 @@ begin
     end else
     begin
         Result := LS.GetMechanicalLayer(i);
-        MLID := Result.LayerID;
+        MLID := Result.V7_LayerID.ID;             // .LayerID  stops working at i=16
     end;
 end;
                                                             // cardinal      V7 LayerID
@@ -668,6 +667,7 @@ begin
     Result.Delimiter     := '.';
 //    Result.Duplicates    := dupAccept;   // requires .Sort
     Result.DelimitedText := Client.GetProductVersion;
+    GetBuildNumberPart(Client.GetProductVersion, 0);
 end;
 
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
