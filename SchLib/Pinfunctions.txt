@@ -1,0 +1,8 @@
+# Text File Format:
+# <tab> delimited.
+# pin-des	FN1	FN2 
+28	RA1
+27	RA0
+26	RE3	MCLR	VPP
+25	RB7	ICSPDAT
+24	RB6	ICSPCLK
