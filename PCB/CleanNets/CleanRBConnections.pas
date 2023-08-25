@@ -1,14 +1,18 @@
 { CleanRBConnections.pas
 
 Run CleanNets() for all connection objects.
+   Sometimes moving rooms & groups of components leaves unresolved
+   connections (rubberbands)
 
-Sometimes moving rooms & groups of components leaves unresolved
-connections (rubberbands)
+LassoCMPsByConnection();
+   CMP placement tool with rules for inside/ouside/distance from click point.
+   <SHIFT>  move locked components, move if other end is NOT a CMP
+   <CTRL>   extended selection: leave moved FP selected, allow group move.
 
-<SHIFT>  move locked components, move if other end is NOT a CMP
-<CTRL>   extended selection: leave moved FP selected, allow group move.
-
-<ALT>   is not available with ChooseLocation()   check this is consistent AD17 & AD21
+ListRoutesAndConnections()
+  report routed nets name & nodes & length (& total)
+  report unrouted connections netname & length (& total)
+   <ALT>   is not available with ChooseLocation()   check this is consistent AD17 & AD21
 
 B. Miller
 12/07/2019 : v0.1  Initial POC
@@ -16,6 +20,7 @@ B. Miller
 29/07/2022 : v0.21 fix modifier keys & add "locked" support.
 2023-07-19 : v0.22 fix TCoord maths problems.
 2023-07-30 : v0.23 allow <SHIFT> to move CMP connected to non-comp net (via, region etc)
+2023-08-25 : v0.24 add report of routed & unrouted netnames & lengths.
 }
 const
     cESC      =-1;
@@ -23,48 +28,141 @@ const
     cShiftKey = 2;
     cCntlKey  = 3;
 
-    cDebugF   = false;
+    cShowReport = true;
+    cDebugF   = true;  // false;
 
 var
-    Board  : IPCB_Board;
-    Keyset : TSet;
-    Report : TStringList;
+    Board   : IPCB_Board;
+    BOrigin : TCoordPoint;
+    Keyset  : TSet;
+    Report  : TStringList;
 
-Procedure CleanUpNetConnections(Board : IPCB_Board);
+function GreaterMagnitude(FP1 : IPCB_Primitive, FP2 : IPCB_Primitive, x : TCoord, y : TCoord) : IPCB_Primitive; forward;
+function GetObjectsFrom(Board : IPCB_Board, ObjKind : integer) : TObjectList; forward;
+Procedure CleanUpNetConnections(Board : IPCB_Board);  forward;
+function VMagnitude(CP : IPCB_Connection) : TCoord; forward;
+Procedure GenerateReport(Report : TStringList, Filename : WideString); forward;
+
+procedure ListRoutesAndConnections;
 var
-    Connect  : IPCB_Connection;
-    Iterator : IPCB_BoardIterator;
-    Net      : IPCB_Net;
-    NetList  : TStringList;
-    N        : integer;
+//    PPM        : IPCB_PinPairsManager;
+//    APPair     : IPCB_PinPair;
+//    AFromTo     : IPCB_FromTo;    // obsolete legacy?
+//    AllFromTos  : TObjectList;
+    APrim      : IPCB_Primitive;
+    RLength    : TCoord;
+    URLength   : TCoord;
+    TRLength   : extended;
+    TURLength  : extended;
 
+    AllNets    : TObjectList;
+    AllConnex  : TObjectList;
+    Connect     : IPCB_Connection;
+    ANet        : IPCB_Net;
+//    APad1       : IPCB_Pad;
+//    APad2       : IPCB_Pad;
+    ANetName    : WideString;
+    i           : integer;
 begin
-    NetList := TStringList.Create;
-    NetList.Sorted := true;
-    NetList.Duplicates := dupIgnore;
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then Exit;
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);
+
+    Report := TStringList.Create;
+
+    CleanUpNetConnections(Board);
+
+    TRLength   := 0;
+    TURLength  := 0;
+
+    Report.Add('Routed Nets');
+    AllNets := GetObjectsFrom(Board, eNetObject);
+    for i := 0 to (AllNets.Count - 1) do
+    begin
+        ANet     := AllNets.Items(i);
+        ANetName := ANet.Name;
+        RLength  := ANet.RoutedLength;
+        TRLength := TRLength + CoordToMMs(RLength);
+        Report.Add(ANetName + '  Pins: ' + IntToStr(ANet.PinCount) + '  RL: ' + CoordUnitToString(RLength, eMM) );
+    end;
+
+    Report.Add('');
+    Report.Add('Unrouted connections');
+    AllConnex := GetObjectsFrom(Board, eConnectionObject);
+    for i := 0 to (AllConnex.Count - 1) do
+    begin
+        Connect  := AllConnex.Items(i);
+        ANet     := Connect.Net;
+        ANetName := ANet.Name;
+        URLength := VMagnitude(Connect);
+        TURLength  := TURLength + CoordToMMs(URLength);
+        Report.Add(ANetName + '  URL: ' + CoordUnitToString(URLength, eMM) + '  at X: ' + CoordUnitToString(Connect.X1-BOrigin.X, eMM) +
+                   ' Y: ' + CoordUnitToString(Connect.Y1-BOrigin.Y, eMM) );
+    end;
+
+    Report.Add('');
+    Report.Add('Tot. Routed Length  : ' + FormatFloat('0.0##', TRLength) +'mm' );
+    Report.Add('Tot. Unrouted Length: ' + FormatFloat('0.0##', TURLength) +'mm' );
+
+{    PPM := Board.PinPairsManager;
+    for i := 0 to (PPM.PinPairsCount - 1) do
+    begin
+        APPair := PPM.PinPairs[i];
+        APPair.Name;
+        URLength := APPair.UnroutedLength;
+        RLength  := APPair.RoutedLength;
+        APPair.PrimitivesCount;
+        APrim := APPair.Primitives[0];
+        APPair.GetPinPairItemDisplayName(APrim);
+    end;
+
+// nothing
+    AllFromTos := GetObjectsFrom(Board, eFromToObject);
+    for i := 0 to (AllFromTos.Count - 1) do
+    begin
+        AFromTo := AllFromTos.Items(i);
+        ANet    := AFromTo.GetNet;
+        APad1   := AFromTo.GetFromPad;
+        APad2   := AFromTo.GetToPad;
+        RLength := AFromTo.GetState_RoutedLength;
+
+        ANetName := ANet.Name;
+    end;
+}
+    AllNets.Free;
+    AllConnex.Free;
+
+    if cDebugF then GenerateReport(Report, 'Connections.txt');
+    Report.Free;
+end;
+
+function VMagnitude(CP : IPCB_Connection) : TCoord;
+begin
+    Result := Power((CP.x1 - CP.x2), 2) + Power((CP.y1 - CP.y2), 2);
+    Result := Sqrt(Result);
+end;
+
+function GetObjectsFrom(Board : IPCB_Board, ObjKind : integer) : TObjectList;
+var
+    Prim     : IPCB_Primitive;
+    Iterator : IPCB_BoardIterator;
+begin
+    Result := TObjectList.Create;
+    Result.OwnsObjects := false;
 
     Iterator := Board.BoardIterator_Create;
-    Iterator.AddFilter_ObjectSet(MkSet(eConnectionObject));
-    Iterator.AddFilter_LayerSet(AllLayers);
-    Iterator.AddFilter_Method(eProcessAll);
+    Iterator.SetState_FilterAll;
+    Iterator.AddFilter_ObjectSet(MkSet(ObjKind));
+    Iterator.AddFilter_AllLayers;
+//    Iterator.AddFilter_Method(eProcessAll);
 
-    Connect := Iterator.FirstPCBObject;
-    while (Connect <> Nil) Do
+    Prim := Iterator.FirstPCBObject;
+    while (Prim <> Nil) Do
     begin
-        Net := Connect.Net;
-        if Net <> Nil then
-            NetList.AddObject(Net.Name, Net);
-
-        Connect := Iterator.NextPCBObject;
+        Result.Add(Prim);
+        Prim := Iterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iterator);
-
-    for N := 0 to (NetList.Count - 1) do
-    begin
-        Net := NetList.Objects(N);
-        Board.CleanNet(Net);
-    end;
-    NetList.Free;
 end;
 
 function TestInsideBoard(Component : IPCB_Component) : boolean;
@@ -184,32 +282,6 @@ begin
 //    ResetParameters;
 //    AddStringParameter('RepositionSelected', 'True');
 //    RunProcess('PCB:PlaceComponent');
-end;
-
-function GreaterMagnitude(FP1 : IPCB_Primitive, FP2 : IPCB_Primitive, x : TCoord, y : TCoord) : IPCB_Primitive;
-var
-    SMag1, SMag2 : double;
-    BR1, BR2     : TRect;
-    CP1, CP2     : TCoordPoint;
-begin
-    Result := FP1;
-    if Result = nil then
-    begin
-        Result := FP2;
-        exit;
-    end;
-    BR1 := FP1.BoundingRectangleForSelection;
-    BR2 := FP2.BoundingRectangleForSelection;
-    CP1 := Point(BR1.X1 + RectWidth(BR1)/2, BR1.Y1 + RectHeight(BR1)/2);
-    CP2 := Point(BR2.X1 + RectWidth(BR2)/2, BR2.Y2 + RectHeight(BR2)/2);
-
-    SMag1 := Power((x - CP1.X), 2) + Power((y - CP1.Y), 2);
-    SMag2 := Power((x - CP2.X), 2) + Power((y - CP2.Y), 2);
-    SMag1 := Sqrt(SMag1);
-    SMag2 := Sqrt(SMag2);
-
-    Report.Add('FP1:' + FloatValueToString(SMag1, eMil) + '  FP2:' + FloatValueToString(SMag2, eMil));
-    if SMag2 > SMag1 then Result := FP2;
 end;
 
 Procedure LassoCMPsByConnection;
@@ -340,6 +412,7 @@ begin
 
     if cDebugF then
         Report.SaveToFile('c:\temp\debug.txt');
+    Report.Free;
 end;
 
 procedure RubberBandMan;
@@ -361,5 +434,108 @@ end;
 procedure CleanNetsProcessCall;
 begin
     Client.SendMessage('PCB:Netlist', 'Action=CleanUpNets|Prompt=false' , 255, Client.CurrentView);
+end;
+
+function GreaterMagnitude(FP1 : IPCB_Primitive, FP2 : IPCB_Primitive, x : TCoord, y : TCoord) : IPCB_Primitive;
+var
+    SMag1, SMag2 : double;
+    BR1, BR2     : TRect;
+    CP1, CP2     : TCoordPoint;
+begin
+    Result := FP1;
+    if Result = nil then
+    begin
+        Result := FP2;
+        exit;
+    end;
+    BR1 := FP1.BoundingRectangleForSelection;
+    BR2 := FP2.BoundingRectangleForSelection;
+    CP1 := Point(BR1.X1 + RectWidth(BR1)/2, BR1.Y1 + RectHeight(BR1)/2);
+    CP2 := Point(BR2.X1 + RectWidth(BR2)/2, BR2.Y2 + RectHeight(BR2)/2);
+
+    SMag1 := Power((x - CP1.X), 2) + Power((y - CP1.Y), 2);
+    SMag2 := Power((x - CP2.X), 2) + Power((y - CP2.Y), 2);
+    SMag1 := Sqrt(SMag1);
+    SMag2 := Sqrt(SMag2);
+
+    Report.Add('FP1:' + FloatValueToString(SMag1, eMil) + '  FP2:' + FloatValueToString(SMag2, eMil));
+    if SMag2 > SMag1 then Result := FP2;
+end;
+
+Procedure CleanUpNetConnections(Board : IPCB_Board);
+var
+    Connect  : IPCB_Connection;
+    Iterator : IPCB_BoardIterator;
+    Net      : IPCB_Net;
+    NetList  : TStringList;
+    N        : integer;
+
+begin
+    NetList := TStringList.Create;
+    NetList.Sorted := true;
+    NetList.Duplicates := dupIgnore;
+
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eConnectionObject));
+    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_Method(eProcessAll);
+
+    Connect := Iterator.FirstPCBObject;
+    while (Connect <> Nil) Do
+    begin
+        Net := Connect.Net;
+        if Net <> Nil then
+            NetList.AddObject(Net.Name, Net);
+
+        Connect := Iterator.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(Iterator);
+
+    for N := 0 to (NetList.Count - 1) do
+    begin
+        Net := NetList.Objects(N);
+        Board.AnalyzeNet(Net);
+        Board.CleanNet(Net);
+    end;
+    NetList.Free;
+end;
+
+Procedure GenerateReport(Report : TStringList, Filename : WideString);
+Var
+    WS             : IWorkspace;
+    Prj            : IProject;
+    Doc            : IDocument;
+    ReportDocument : IServerDocument;
+    Filepath       : WideString;
+
+Begin
+    WS  := GetWorkspace;
+    If WS <> Nil Then
+    begin
+       Prj := WS.DM_FocusedProject;
+       Doc := WS.DM_FocusedDocument;
+
+       If Prj <> Nil Then
+          Filepath := ExtractFilePath(Prj.DM_ProjectFullPath);   //  Doc.DM_FullPath
+
+//  to get unique report file per SchLib doc..
+    //   Filepath := ExtractFilePath(Doc.FullPath) + ChangefileExt(ExtractFileName(Doc.FullPath), '');
+    end;
+
+    If length(Filepath) < 5 then Filepath := ExtractFilePath(Doc.DM_FullPath);
+
+    Filepath := Filepath + Filename;
+
+    Report.Insert(0, ExtractFilename(Prj.DM_ProjectFullPath));
+    Report.SaveToFile(Filepath);
+
+    if not cShowReport then exit;
+    ReportDocument := Client.OpenDocument('Text',Filepath);
+    If ReportDocument <> Nil Then
+    begin
+        Client.ShowDocument(ReportDocument);
+        if (ReportDocument.GetIsShown <> 0 ) then
+            ReportDocument.DoFileLoad;
+    end;
 end;
 
