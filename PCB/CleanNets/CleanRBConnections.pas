@@ -20,7 +20,7 @@ B. Miller
 29/07/2022 : v0.21 fix modifier keys & add "locked" support.
 2023-07-19 : v0.22 fix TCoord maths problems.
 2023-07-30 : v0.23 allow <SHIFT> to move CMP connected to non-comp net (via, region etc)
-2023-08-25 : v0.24 add report of routed & unrouted netnames & lengths.
+2023-08-25 : v0.25 add report of routed & unrouted netnames & lengths & summary totals.
 }
 const
     cESC      =-1;
@@ -54,7 +54,7 @@ var
     URLength   : TCoord;
     TRLength   : extended;
     TURLength  : extended;
-
+    TPinCnt    : integer;
     AllNets    : TObjectList;
     AllConnex  : TObjectList;
     Connect     : IPCB_Connection;
@@ -72,10 +72,12 @@ begin
 
     CleanUpNetConnections(Board);
 
-    TRLength   := 0;
-    TURLength  := 0;
+    TRLength  := 0;
+    TURLength := 0;
+    TPinCnt   := 0;
 
     Report.Add('Routed Nets');
+    Report.Add('NetName     Pins  Length ');
     AllNets := GetObjectsFrom(Board, eNetObject);
     for i := 0 to (AllNets.Count - 1) do
     begin
@@ -83,11 +85,13 @@ begin
         ANetName := ANet.Name;
         RLength  := ANet.RoutedLength;
         TRLength := TRLength + CoordToMMs(RLength);
-        Report.Add(ANetName + '  Pins: ' + IntToStr(ANet.PinCount) + '  RL: ' + CoordUnitToString(RLength, eMM) );
+        TPinCnt  := TPinCnt + ANet.PinCount;
+        Report.Add(Padright(ANetName,10) + '  ' + Padleft(IntToStr(ANet.PinCount),4) + '  ' + CoordUnitToString(RLength, eMM) );
     end;
 
     Report.Add('');
     Report.Add('Unrouted connections');
+    Report.Add('NetName      Length   X    Y ');
     AllConnex := GetObjectsFrom(Board, eConnectionObject);
     for i := 0 to (AllConnex.Count - 1) do
     begin
@@ -96,11 +100,14 @@ begin
         ANetName := ANet.Name;
         URLength := VMagnitude(Connect);
         TURLength  := TURLength + CoordToMMs(URLength);
-        Report.Add(ANetName + '  URL: ' + CoordUnitToString(URLength, eMM) + '  at X: ' + CoordUnitToString(Connect.X1-BOrigin.X, eMM) +
-                   ' Y: ' + CoordUnitToString(Connect.Y1-BOrigin.Y, eMM) );
+        Report.Add(PadRight(ANetName,10) + '  ' + PadLeft(CoordUnitToString(URLength, eMM),8) + '  ' + CoordUnitToString(Connect.X1-BOrigin.X, eMM) +
+                   '  ' + CoordUnitToString(Connect.Y1-BOrigin.Y, eMM) );
     end;
 
     Report.Add('');
+    Report.Add('Tot. Nets           : ' + IntToStr(AllNets.Count) );
+    Report.Add('Tot. Pins           : ' + IntToStr(TPinCnt) );
+    Report.Add('Tot. Connections    : ' + IntToStr(AllConnex.Count) );
     Report.Add('Tot. Routed Length  : ' + FormatFloat('0.0##', TRLength) +'mm' );
     Report.Add('Tot. Unrouted Length: ' + FormatFloat('0.0##', TURLength) +'mm' );
 
