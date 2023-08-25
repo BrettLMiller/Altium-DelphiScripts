@@ -29,7 +29,7 @@ const
     cCntlKey  = 3;
 
     cShowReport = true;
-    cDebugF   = true;  // false;
+    cDebugF     = false;
 
 var
     Board   : IPCB_Board;
@@ -139,7 +139,7 @@ begin
     AllNets.Free;
     AllConnex.Free;
 
-    if cDebugF then GenerateReport(Report, 'Connections.txt');
+    GenerateReport(Report, 'Connections.txt');
     Report.Free;
 end;
 
