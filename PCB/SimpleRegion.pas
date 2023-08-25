@@ -1,8 +1,9 @@
 { SimpleRegion.pas
 
 B Miller
-15/05/2021  v0.10 POC.
-
+15/05/2021 : v0.10 POC.
+2023-08-26 : v0.11 set masks
+ 
 }
 
 const
@@ -65,6 +66,9 @@ begin
     end;
 
     Result.SetState_Kind(eRegionKind_Copper);
+    Result.SetState_IsKeepout(false);
+    Result.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
+    Result.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
     Result.Layer := Layer;
     Result.Net   := Net;
 //    Result.UnionIndex := UIndex;
