@@ -5,7 +5,8 @@
 Summary
 RefreshAllSymbolFunctionFromName : All
 RefreshOneCMPSymbolPinFunctions  : one picked or current CMP
-   Transfers existing Pin name info into Functions extension (AD20+)
+RefreshOneCMPSymPinFuncsFromDesc : one picked or current CMP
+   Transfers existing Pin name (or description) info into Functions extension (AD20+)
 
 LoadCMPSymbolPinNamesFromFile
 LoadCMPSymbolPinNamesFromClipBoard
@@ -50,31 +51,33 @@ Text=Var S,L,H,P,N;Begin S:=SchServer.GetCurrentSchDocument;L:=EmptyLocation;S.C
 .....................................................................................}
 
 const
-    PinFuncFile  = 'PinFunctions.txt';   // not used..
+    PinFuncFile       = 'PinFunctions.txt';   // not used..
     AD19VersionMajor  = 19;
     AD20VersionMajor  = 20;
     cShowReport       = false;       // load show report file
     cCommaToFSlash    = true;        // convert clipboard text commas to forward slash.
+    cDescription      = 2;
+    cPinName          = 1;
 
 Var
     CurrentSheet : ISch_Document;
     PinFuncList  : TStringList;
     Symbolslist  : TStringList;
     IsLib        : boolean;
-    VerMajor     : WideString;
+    VerMajor     : integer;
 
 procedure ProcessCompPinFunctions(Comp : ISch_Component); forward;
 function PickAComp(const Sheet : ISch_Document, IsLib : boolean) : ISch_GraphicalObject; forward;
 Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList; forward;
 function GetAllCompPins(Comp : ISch_Component) : TList; forward;
-function RefreshCompSymbolPinFunc(Component) : boolean; forward;
+function RefreshCompSymbolPinFunc(Component : ISch_Component, const NameNDesc : integer) : boolean; forward;
 function RemoveFSCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
 function NegationChangePTA(Component : ISch_Component) : boolean; forward;
 function ImportClipBoard(const dummy : boolean) : TStringList; forward;
 function CleanCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
 function CleanPinName(Name : WideString) : WideString;  forward;
+function CleanPinName22(Name : WideString) : WideString;  forward;
 function CleanPinName17(Name : WideString) : WideString;  forward;
-function Version(const dummy : boolean) : TStringList;  forward;
 Procedure GenerateReport(Report : TStringList, Filename : WideString);  forward;
 Procedure SetDocumentDirty (const Dummy : Boolean); forward;
 
@@ -99,7 +102,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     FileName := '';
     Path := ExtractFilePath(CurrentSheet.DocumentName) ;
@@ -178,7 +181,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
     SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
@@ -222,7 +225,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
     SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
@@ -262,7 +265,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
 
@@ -298,7 +301,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
 
@@ -310,6 +313,46 @@ begin
         Comp.GraphicallyInvalidate;
     end;
 
+    SymbolsList.Free;
+end;
+
+procedure RefreshOneCMPSymPinFuncsFromDesc;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
+
+    Symbolslist := TStringList.Create;
+    SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
+    SymbolsList.Add ('');
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        SymbolsList.Add ('Refresh Pin Functions from Pin Desciption for Comp SYM  : ' + Comp.LibReference);
+        RefreshCompSymbolPinFunc(Comp, cDescription);
+        Comp.GraphicallyInvalidate;
+    end;
+
+    GenerateReport(SymbolsList, 'RefreshPinNameFuncNames.txt');
     SymbolsList.Free;
 end;
 
@@ -334,7 +377,7 @@ begin
     IsLib := false;
     If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
     SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
@@ -345,7 +388,7 @@ begin
     if Comp <> nil then
     begin
         SymbolsList.Add ('Refresh Pin Functions from Pin Names for Comp SYM  : ' + Comp.LibReference);
-        RefreshCompSymbolPinFunc(Comp);
+        RefreshCompSymbolPinFunc(Comp, cPinName);
         Comp.GraphicallyInvalidate;
     end;
 
@@ -378,7 +421,7 @@ Begin
     End;
 
     BeginHourGlass(crHourGlass);
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
     SymbolsList.Add    (' All Comp Symbols: ' + ' refresh function from Name ');
@@ -413,7 +456,7 @@ Begin
 
         SymbolsList.Add(' Refreshed Func. for Pin Designator & Name');
 
-        RefreshCompSymbolPinFunc(Component);
+        RefreshCompSymbolPinFunc(Component, cPinName);
 
         SymbolsList.Add('');
         SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_EndModify, c_NoEventData);
@@ -457,7 +500,7 @@ Begin
     End;
 
     BeginHourGlass(crHourGlass);
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     Symbolslist := TStringList.Create;
     SymbolsList.Add    (' All Comp Symbols: ' + ' clean Pin Names ');
@@ -657,10 +700,13 @@ begin
     PinList.Free;
 end;
 {..............................................................................}
-function RefreshCompSymbolPinFunc(Component) : boolean;
+function RefreshCompSymbolPinFunc(Component : ISch_Component, const NameNDesc : integer) : boolean;
 var
     Pin            : ISch_Pin;
     PinIterator    : ISch_Iterator;
+    PinName        : WideString;
+    PinDesc        : WideString;
+
 begin
     PinIterator := Component.SchIterator_Create;
     PinIterator.AddFilter_ObjectSet(MkSet(ePin));
@@ -668,14 +714,38 @@ begin
     Pin := PinIterator.FirstSchObject;
     While Pin <> Nil Do
     Begin
-        If Pin.Name <> '' then
-        if (ansipos('/', Pin.Name) > 1) then
-        Begin
-            if VerMajor >= AD20VersionMajor then
-                Pin.SetState_FunctionsFromName;
+        PinName := Pin.GetState_Name;
+        PinDesc := Pin.GetState_Description;
 
-               Pin.GraphicallyInvalidate;
-            SymbolsList.Add ('  ' + Pin.Designator + '|' + Pin.Name);
+        if NameNDesc = cPinName then
+        If PinName <> '' then
+        if (ansipos('/', PinName) > 1) then
+        Begin
+            PinName := CleanPinName(PinName);
+
+            if VerMajor >= AD20VersionMajor then
+            begin
+                Pin.SetState_FunctionsFromName;
+                Pin.GraphicallyInvalidate;
+            end;
+            SymbolsList.Add ('  ' + Pin.Designator + ' | ' + PinName + ' | ' + PinDesc);
+        end;
+
+        if NameNDesc = cDescription then
+        If PinDesc <> '' then
+        if (ansipos('/', PinDesc) > 1) then
+        Begin
+            PinDesc := CleanPinName(PinDesc);
+
+            if VerMajor >= AD20VersionMajor then
+            begin
+                Pin.SetState_Name(PinDesc);
+                Pin.SetState_FunctionsFromName;
+                Pin.SetState_Name(PinName);
+                Pin.GraphicallyInvalidate;
+            end;
+
+            SymbolsList.Add ('  ' + Pin.Designator + ' | ' + PinName + ' | ' + PinDesc);
         end;
         Pin := PinIterator.NextSchObject;
     End;
@@ -697,11 +767,7 @@ begin
     While Pin <> Nil Do
     Begin
         OldPinName := Pin.Name;
-
-        if VerMajor >= AD20VersionMajor then
-            PinName    := CleanPinName(OldPinName)
-        else
-            PinName    := CleanPinName17(OldPinName);
+        PinName    := CleanPinName(OldPinName);
 
         Pin.SetState_Name(PinName);
         Pin.GraphicallyInvalidate;
@@ -821,6 +887,15 @@ begin
 end;
 {..............................................................................}
 function CleanPinName(Name : WideString) : WideString;
+begin
+    Result := Name;
+    if VerMajor >= AD20VersionMajor then
+        Result := CleanPinName22(Name)
+    else
+        Result := CleanPinName17(Name);
+end;
+
+function CleanPinName22(Name : WideString) : WideString;
 begin
     Result := Name;
 // remove lead & trailling space
@@ -956,13 +1031,5 @@ Begin
     AServerDocument := AView.OwnerDocument;
     AServerDocument.Modified := True;
 End;
-{..............................................................................}
-function Version(const dummy : boolean) : TStringList;
-begin
-    Result               := TStringList.Create;
-    Result.Delimiter     := '.';
-//    Result.Duplicates    := dupAccept;   // requires .Sort
-    Result.DelimitedText := Client.GetProductVersion;
-end;
 {..............................................................................}
 
