@@ -27,7 +27,8 @@
        Make region cutouts around pad/via to pass DRC.
 
    CreateBlindViaPlanePads
-       Makes pad on (unconnected) InternalPlane StopLayer to allow hole plating & strengthen outer pad/via.
+       Makes pad on (unconnected) InternalPlane StopLayer to allow hole plating & strengthen outer pad/via
+       and allow stacked microvias.
        Makes true Net & class clearance like MakeDRCPlaneNetClearance
        Adds clearance ring (from Rules) & adds splitplane "Pad" with assigned net same size as Via start layer.
        Recommend user to use PlaneConnectStyle rule for microvia drillpair to avoid silly unconnected spokes.
@@ -42,6 +43,7 @@
  2023-08-04  v0.33 allow region (copper) copy to Plane
  2023-08-06  v0.34 add DRC check for nets & SplitPlanes
  2023-09-18  v0.35 add PlanePads for microvia terminating (short antenna via) in InternalPlane.
+ 2023-09-18  v0.36 fix stacked microvias, allow splitplane to be set "No Net".
 
 Anti-Regions allows removal of split lines in AD17.
 The built-in Poly grow function is NOT very robust, better with simple shape geometry.
@@ -152,11 +154,6 @@ begin
                 if Not SplitPlane.PointInPolygon(AVia.x, AVia.y) then continue;
 
                 MoreClear := -1;
-                if AVia.StartLayer = LayerObj then
-                begin
-                    ShapeLayer := AVia.StopLayer.V7_LayerID.ID;
-                    MoreClear := CheckPrimClear(Board, AVia, SplitPlane, false);
-                end;
                 if AVia.StopLayer = LayerObj then
                 begin
                     ShapeLayer := AVia.StartLayer.V7_LayerID.ID;
@@ -165,7 +162,9 @@ begin
 
                 VAD := AVia.SizeOnLayer(AVia.StartLayer.V7_LayerID.ID);
 
+// need to add SplitPlaneRegion for each "pad" to set Region net? or just ring?
 // MoreClear = -1 for same net & in SplitPlane: no ring required.
+// only add split ring if net not same as SP region.
                 if (MoreClear >= 0) then
                 begin
 // MoreClear internalplane calculated on hole & with NO annular ring
@@ -418,6 +417,7 @@ begin
 
 // if same net then ignore as would be connected with relief structure.
     if MinClear = 0 then
+    if PNet <> nil then
     if PNet.UniqueId = PNet2.UniqueId then
     begin
         Result := -1;
@@ -433,7 +433,7 @@ begin
     Gap2 := 0;
     Gap3 := 0;
     Gap4 := 0;
-    PNet.Name;
+//    PNet.Name;
     Prim.ObjectId;
     PNet2.Name;
     CoordToMils(MinClear);
@@ -457,6 +457,7 @@ begin
     if Rule <> nil then
     begin
         Gap3 := Rule.GetClearance(SplitPlaneReg, Prim);
+        if PNet <> nil then
         if PNet.UniqueId = PNet2.UniqueId then Gap3 := 0;
         if Violate then
         if Rule.Enabled and (Gap3 > MinClear) then
