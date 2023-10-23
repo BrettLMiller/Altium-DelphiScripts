@@ -16,6 +16,7 @@
  07/01/2021  v1.5  Try again with TInterfaceList & rearranged Delete() outside of GroupIterator
  08/01/2021  v1.6  Added StatusBar percentage delete progress & Cursor busy.
  03/07/2022  v1.7  refactor FP iterating simplify deleting with another objectlist.
+ 2023-10-22  v1.8  add dialog to allow optional bypass limit to cMaxObjects count
 
 1000 primitives takes 2:30 mins & 1GB ram
 
@@ -32,7 +33,7 @@ delete footprint..
 ..............................................................................}
 
 const
-    MaxObjects = 1000;
+    cMaxObjects = 1000;   // safe low number
     FP = '___TemporaryComponent__DeleteMeWhenDone___';   // name for temp FP comp.
 
 Procedure DeleteSelectedItemsFromFootprints;
@@ -55,6 +56,7 @@ Var
     HowMany           : String;
     HowManyInt        : Integer;
     SelCountTot       : integer;
+    MaxObjects        : integer;
     intDialog         : Integer;
     Remove            : boolean;
     First             : boolean;                // control (limit) LibCompList to ONE instance.
@@ -62,22 +64,22 @@ Var
     iStatusBar        : integer;
 
 Begin
-     GUIMan := Client.GUIManager;
+    GUIMan := Client.GUIManager;
 
-     CurrentLib := PCBServer.GetCurrentPCBLibrary;
-     If CurrentLib = Nil Then
-     Begin
-         ShowMessage('This is not a PcbLib document');
-         Exit;
-     End;
+    CurrentLib := PCBServer.GetCurrentPCBLibrary;
+    If CurrentLib = Nil Then
+    Begin
+        ShowMessage('This is not a PcbLib document');
+        Exit;
+    End;
 
 // Verify user wants to continue, if cancel pressed, exit script.  If OK, continue
-     intDialog := MessageDlg('!!! Operation can NOT be undone, proceed with caution !!! ', mtWarning, mbOKCancel, 0);
-     if intDialog = mrCancel then
-     begin
-         ShowMessage('Cancel pressed. Exiting ');
-         Exit;
-     end;
+    intDialog := MessageDlg('!!! Operation can NOT be undone, proceed with caution !!! ', mtWarning, mbOKCancel, 0);
+    if intDialog = mrCancel then
+    begin
+        ShowMessage('Cancel pressed. Exiting ');
+        Exit;
+    end;
 
     DeleteList  := TObjectList.Create;
     DeleteList.OwnsObjects := false;
@@ -90,7 +92,6 @@ Begin
     for I := 0 to (CurrentLib.ComponentCount - 1) do
     begin
         Footprint := CurrentLib.GetComponent(I);
-
         First := true;
 
         GIterator := Footprint.GroupIterator_Create;
@@ -111,9 +112,6 @@ Begin
             MyPrim := GIterator.NextPCBObject;
         end;
         Footprint.GroupIterator_Destroy(GIterator);
-
-        if DeleteList.Count >= MaxObjects then break;
-
     end;
 
 // these are cleared again by focusing the temp component..
@@ -128,9 +126,16 @@ Begin
 
 // focus the temp footprint
     CurrentLib.SetState_CurrentComponent(TempPcbLibComp);
-//    CurrentLib.CurrentComponent := TempPcbLibComp;
     CurrentLib.Board.ViewManager_FullUpdate;          // update all panels assoc. with PCB
     CurrentLib.RefreshView;
+
+    MaxObjects := DeleteList.Count;
+    if MaxObjects > cMaxObjects then
+    begin
+        intDialog := MessageDlg('Selected Count greater than MaxObjects, Limit Delete Count to ' + IntToStr(cMaxObjects) + ' ?', mtConfirmation, mbYesNo, 0);
+        if intDialog = mrYes then
+            MaxObjects := cMaxObjects;
+    end;
 
     BeginHourGlass(crHourGlass);
     PCBServer.PreProcess;
@@ -142,26 +147,18 @@ Begin
     begin
         Footprint := FPList.Items(I);
         
-//        Footprint := CurrentLib.GetComponent(I);
-//        if Footprint.Name = TempPCBLibComp.Name  then continue;
-        
         iStatusBar := Int(HowManyInt / SelCountToT * 100);
         sStatusBar := ' Deleting : ' + IntToStr(iStatusBar) + '% done';
         GUIMan.StatusBar_SetState (1, sStatusBar);
 
-
 // can NOT delete Prim without re-creating the Group Iterator.
-// so make another list to delete from!
+// so make another list to delete from
 
         GIterator := Footprint.GroupIterator_Create;
         MyPrim := GIterator.FirstPCBObject;
         while MyPrim <> Nil Do
-//        for K := 1 to Footprint.GetPrimitiveCount(MkSet(eTrackObject)) do
         begin
-// sadly no collection of ALL..
-//            MyPrim := Footprint.GetPrimitiveAt(K, eTrackObject);
-
-            for J := 0 to (DeleteList.Count - 1) do
+            for J := 0 to (MaxObjects - 1) do
             begin
                 Prim2 := DeleteList.Items(J);
                 if (MyPrim.I_ObjectAddress = Prim2.I_ObjectAddress) then
@@ -212,8 +209,5 @@ Begin
     HowMany := IntToStr(HowManyInt);
     if HowManyInt = 0 then HowMany := '-NO-';
     ShowMessage('Deleted ' + HowMany + ' Items | selected count : ' + IntToStr(SelCountTot) );
-//    ShowMessage('Deleted ' + HowMany + ' Items ' + '  List ' + IntToStr(DeleteList.Count) + '  SelCount' + IntToStr(SelCountTot) );
-
 End;
 {..............................................................................}
-
