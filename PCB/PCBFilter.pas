@@ -3,10 +3,10 @@ sanitised copy
 
 set PCB-Filter from cursor rectanglar selection
 
-
 Usage:
-    user has to click select "Apply to All" to apply query expression.
-    if you run process with "Apply=True" and any expression then raises errors with script already running!!
+    If you run process or use SendMessage() with "Apply=True" and any expression then raises errors with script already running!!
+    and user has to click select "Apply to All" to apply query expression.
+    PostMessage() does not raise warning but ONLY executes when script exits.
 
 The DisplayUnits reversal may be fixed in later AD.
 
