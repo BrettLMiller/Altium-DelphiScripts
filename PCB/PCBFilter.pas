@@ -51,10 +51,15 @@ begin
         if x > x2 then IntSwap(x, x2);
         if y > y2 then IntSwap(y, y2);
 
-        QExpression := 'InRegionAbsolute(' + CoordUnitToStringNoUnit(x,  BUnit) + ',' + CoordUnitToStringNoUnit(y,  BUnit) + ','
-                                           + CoordUnitToStringNoUnit(x2, BUnit) + ',' + CoordUnitToStringNoUnit(y2, BUnit) + ')';
+// must be in mils for AD17
+        if BUnit = eMil then
+            QExpression := 'InRegionAbsolute(' + CoordUnitToStringNoUnit(x,  BUnit) + ',' + CoordUnitToStringNoUnit(y,  BUnit) + ','
+                                               + CoordUnitToStringNoUnit(x2, BUnit) + ',' + CoordUnitToStringNoUnit(y2, BUnit) + ')';
+        if BUnit = eMM then
+            QExpression := 'InRegionAbsolute(AsMils(' + CoordUnitToStringNoUnit(x,  BUnit) + '),AsMils(' + CoordUnitToStringNoUnit(y,  BUnit) + ')'
+                                         + ',AsMils(' + CoordUnitToStringNoUnit(x2, BUnit) + '),AsMils(' + CoordUnitToStringNoUnit(y2, BUnit) + '))';
 
-        Client.SendMessage('PCB:RunQuery', 'Expr=' + QExpression + '|Zoom=False|DeSelect=false|Select=True|Mask=True', 1023, Client.CurrentView);
+        Client.PostMessage('PCB:RunQuery', 'Expr=' + QExpression + '|Zoom=False|DeSelect=false|Select=True|Mask=True|Apply=True', 1023, Client.CurrentView);
 //        Client.SendMessage('PCB:RunQuery', 'Expr=' + QExpression + '|Zoom=False|DeSelect=false|Select=True|Mask=True|Apply=True', 1023, Client.CurrentView);
     end;
 end;
