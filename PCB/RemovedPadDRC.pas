@@ -3,11 +3,13 @@
            - Pad or Via has removed pad & is connected on layer
            Creates a special (disabled) MinimumAnnularRing rule to violate.
 
+MinimumAnnularRing has no Layer scope & ignores OnLayer/ExistsOnLayer., all violations show as same layer.
 
 Author: BL Miller
-20231214   : POC from NetViaAntennasDRC & PadShapeRemoved.pas
+20231214  : 0.1  POC from NetViaAntennasDRC & PadShapeRemoved.pas
+            0.12 Violate against rule for each layer.
 
-BROKEN proc CleanViolations()  just in case clean up needed at some point..
+Extra proc CleanViolations()  just in case clean up needed at some point..
 
 tbd:
 Does this need to consider legacy Protel planes (all one net), test sysPrefs for InternalPlanes.
@@ -22,8 +24,8 @@ Polygon/SplitPlane.GetState_HitPrimitive;
 {..............................................................................}
 const
     SpecialRuleName1 = '__Script-PadRemoved__';
-    SpecialRuleKind = eRule_MinimumAnnularRing;
-    cAllRules       = -1;
+    SpecialRuleKind  = eRule_MinimumAnnularRing;
+    cAllRules        = -1;
 
 var
     Board      : IPCB_Board;
@@ -72,12 +74,13 @@ begin
 end;
 
 // Rule generated to violate!
-function AddSpecialViaRule(const RuleName, const RuleKind : WideString, const CText : WideString) : IPCB_Rule;
+function AddSpecialViaRule(const RuleName, const RuleKind : WideString, const LayerName : WideString, const CText : WideString) : IPCB_Rule;
 begin
     Result := PCBServer.PCBRuleFactory(RuleKind);   //TRuleKind
 //    PCBServer.PreProcess;
-    Result.Name := RuleName;
-    Result.Scope1Expression := 'IsVia or IsPad';
+    Result.Name := RuleName + LayerName;
+// Layer scope does not work in built-in DRC
+    Result.Scope1Expression := 'ExistsOnLayer(' + Chr(39) + LayerName + Chr(39) + ')';
     Result.Scope2Expression := '';
     Result.Comment          := CText;
 
@@ -87,20 +90,24 @@ begin
 //    PCBServer.PostProcess;
 end;
 
-function MakeViolation(Board : IPCB_Board, Rule : IPCB_Rule, Prim : IPCB_Primitive, Layer : TLayer) : IPCB_Violation;
+function MakeViolation(Board : IPCB_Board, Rule : IPCB_Rule, Prim : IPCB_Primitive, const Layer : TLayer) : IPCB_Violation;
 var
+//   Rule      : IPCB_Rule;
    Violation : IPCB_Violation;
 begin
-    Violation := nil;
+// always finds same wrong layer rule
+//    Rule := Board.FindDominantRuleForObject(Prim, RuleKind);
+
     if Rule.IsUnary then
 //    Rule.Scope1Includes(Prim);     // adds nothing
+    Violation := nil;
     if Rule.CheckUnaryScope(Prim) then
         Violation := Rule.ActualCheck(Prim, nil);
     if Violation <> nil then
     begin
         Violation.Name;
         Violation.Description;
-        Violation.Layer := Layer;    // seems to do nothing..
+        Violation.Layer := Layer;
 
         Board.AddPCBObject(Violation);
         Prim.SetState_DRCError(true);
@@ -136,8 +143,6 @@ var
     MajorADVersion : WideString;
     found          : Boolean;
     R, SP          : integer;
-    StartLayer     : IPCB_LayerObject;
-    StopLayer      : IPCB_LayerObject;
     Connected      : boolean;
     bRemoved       : boolean;
     bOnLayer       : boolean;
@@ -162,12 +167,22 @@ begin
 
 // test for special rule
     RulesList := GetMatchingRulesFromBoard(SpecialRuleKind);
-    Rule1 := FoundRuleName(RulesList, SpecialRuleName1);
 
     PCBServer.PreProcess;
 
-    if Rule1 = nil then  Rule1 := AddSpecialViaRule(SpecialRuleName1, SpecialRuleKind, 'Disabled Removed Pad Shape Violations');
-    if Rule1 <> nil then Rule1.DRCEnabled := true;
+    LayerObj := LayerStack.First(eLayerClass_Electrical);
+    while LayerObj <> nil do
+    begin
+        TV7_Layer := LayerObj.V7_LayerID;
+        Layer := TV7_Layer.ID;
+
+        Rule1 := FoundRuleName(RulesList, SpecialRuleName1 + LayerObj.Name);
+
+        if Rule1 = nil then  Rule1 := AddSpecialViaRule(SpecialRuleName1, SpecialRuleKind, LayerObj.Name, 'Disabled Removed Pad Shape Violations');
+        if Rule1 <> nil then Rule1.DRCEnabled := true;
+
+        LayerObj := LayerStack.Next(eLayerClass_Electrical, LayerObj);
+    end;
 
     ViolCount  := 0;
     ViolCount2 := 0;
@@ -195,8 +210,6 @@ begin
         bPrimViolates := false;
 
         Rectangle  := PVPrim.BoundingRectangle;
-        StartLayer := nil;
-        StopLayer  := nil;
         Pad := nil;
         Via := nil;
 
@@ -210,14 +223,6 @@ begin
         LayerObj := LayerStack.First(eLayerClass_Electrical);
         while LayerObj <> nil do
         begin
-            if PVPrim.ObjectId = eViaObject then
-            begin
-                if Via.StartLayer = LayerObj then
-                    StartLayer := LayerObj;
-                if Via.StopLayer = LayerObj then
-                    StopLayer := LayerObj;
-            end;
-
             TV7_Layer := LayerObj.V7_LayerID;
             Layer := TV7_Layer.ID;
             PLayerSet := LayerSetUtils.CreateLayerSet.Include(Layer);
@@ -318,6 +323,8 @@ begin
             begin
                 bPrimViolates := true;
                 Violation := nil;
+                Rule1 := FoundRuleName(RulesList, SpecialRuleName1 + LayerObj.Name);
+
                 if Rule1 <> nil then
                     Violation := MakeViolation(Board, Rule1, PVPrim, Layer);
                 if Violation <> nil then inc(ViolCount);
@@ -337,14 +344,22 @@ begin
     Board.BoardIterator_Destroy(Iter);
 
 //   need to retain rules to make DRC UI display violation interactive
-    if Rule1 <> nil then
+
+    LayerObj := LayerStack.First(eLayerClass_Electrical);
+    while LayerObj <> nil do
     begin
-        Rule1.DRCEnabled := false;
-        if ViolCount = 0 then
+        Rule1 := FoundRuleName(RulesList, SpecialRuleName1 + LayerObj.Name);
+        if Rule1 <> nil then
         begin
-            Board.RemovePCBObject(Rule1);
-            PCBServer.DestroyPCBObject(Rule1);
+            Rule1.DRCEnabled := false;
+            if ViolCount = 0 then
+            begin
+                Board.RemovePCBObject(Rule1);
+                PCBServer.DestroyPCBObject(Rule1);
+            end;
         end;
+
+        LayerObj := LayerStack.Next(eLayerClass_Electrical, LayerObj);
     end;
 
     PCBServer.PostProcess;
@@ -355,3 +370,22 @@ begin
 //    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
 end;
 
+
+// Just in case some clean up is required to remove stubborn violations..
+procedure CleanViolations;
+var
+    Iterator  : IPCB_BoardIterator;
+    Violation : IPCB_Violation;
+    Via       : IPCB_Via;
+    VObjList  : TObjectList;
+    I         : integer;
+
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    if Board = nil then exit;
+
+// broken weird behaviour so hide.
+
+    Board.ViewManager_FullUpdate;
+    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+end;
