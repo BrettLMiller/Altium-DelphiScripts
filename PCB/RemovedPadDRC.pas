@@ -5,9 +5,11 @@
 
 MinimumAnnularRing has no Layer scope & ignores OnLayer/ExistsOnLayer., all violations show as same layer.
 
+
 Author: BL Miller
 20231214  : 0.1  POC from NetViaAntennasDRC & PadShapeRemoved.pas
             0.12 Violate against rule for each layer.
+20231215    0.13 Unary check was messed up
 
 Extra proc CleanViolations()  just in case clean up needed at some point..
 
@@ -95,12 +97,12 @@ var
 //   Rule      : IPCB_Rule;
    Violation : IPCB_Violation;
 begin
-// always finds same wrong layer rule
+// always finds same wrong/default layer rule
 //    Rule := Board.FindDominantRuleForObject(Prim, RuleKind);
 
-    if Rule.IsUnary then
-//    Rule.Scope1Includes(Prim);     // adds nothing
     Violation := nil;
+    if Rule.IsUnary then
+//  if  Rule.Scope1Includes(Prim) then     // adds nothing
     if Rule.CheckUnaryScope(Prim) then
         Violation := Rule.ActualCheck(Prim, nil);
     if Violation <> nil then
@@ -363,11 +365,10 @@ begin
     end;
 
     PCBServer.PostProcess;
-    ShowInfo (IntToStr(ViolCount2) + ' Pad&Via(s) with ' + IntToStr(ViolCount) +' removed pads & connection Violations found/DRC marked');
     EndHourGlass;
-
     Board.ViewManager_FullUpdate;
 //    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+    ShowInfo (IntToStr(ViolCount2) + ' Pad&Via(s) with ' + IntToStr(ViolCount) +' removed pads & connection Violations found/DRC marked');
 end;
 
 
