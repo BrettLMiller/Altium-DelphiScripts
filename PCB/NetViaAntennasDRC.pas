@@ -3,7 +3,7 @@
            - Via is connected on only one layer
            - Via not connected at both ends
            Also runs NetAntennae Rules (rulekind).
-           Creates a special (disabled) via rules to violate.
+           Creates a special (disabled) RoutingViaStyle rule to violate.
 
  Created by:    Petar Perisin
 ..............................................................................
@@ -23,6 +23,7 @@ B. Miller
            : Add Strict stub via detection
 20230710   : use MasterLayerStack methods.
            : IsConnectedToPlane(TV6Layer) still needed (Planes are TV6)
+20231216   : remove part of the CleanViolations() code that is broken. 
 
 Extra proc CleanViolations()  just in case clean up needed at some point..
 }
@@ -111,6 +112,10 @@ function MakeViolation(Board : IPCB_Board, Rule : IPCB_Rule, Prim : IPCB_Primiti
 var
    Violation : IPCB_Violation;
 begin
+//    Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
+//    Violation.Description := 'new description';
+
+
     Violation := nil;
     if Rule.IsUnary then
 //    Rule.Scope1Includes(Prim);     // adds nothing
@@ -120,6 +125,10 @@ begin
     begin
         Violation.Name;
         Violation.Description;
+//        Violation.SetState_Name('new name');
+//        Violation.SetState_Description('new description');
+//        Violation.Description := 'new description';
+//        Violation.Detail := 'new detail';
 
         Board.AddPCBObject(Violation);
         Prim.SetState_DRCError(true);
@@ -164,7 +173,7 @@ var
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
-
+    PCBServer.SystemOptions;
     Client.SendMessage('PCB:DeSelect', 'Scope=All', 255, Client.CurrentView);
 
 // Check AD version for layer stack version
@@ -240,8 +249,7 @@ begin
             TV7_Layer := LayerObj.V7_LayerID;
             Layer := TV7_Layer.ID;
 //            showmessage(intTostr(Layer));
-            PLayerSet := LayerSetUtils.EmptySet;
-            PLayerSet.Include(Layer);
+            PLayerSet := LayerSetUtils.CreateLayerSet.Include(Layer);
 
 //  signal layers
             if Via.IntersectLayer(Layer) then
@@ -275,7 +283,7 @@ begin
 
 //  Plane layers
             if Via.IntersectLayer(Layer) then
-            if Via.IsConnectedToPlane(Layer) then
+            if Via.GetState_IsConnectedToPlane(Layer) then
             if LayerUtils.IsInternalPlaneLayer(Layer) then
             begin
                 PlaneIter.AddFilter_IPCB_LayerSet(PLayerSet);
@@ -283,6 +291,7 @@ begin
                 while (SplitPlane <> Nil) Do
                 begin
 //                    if SplitPlane.PrimitiveInsidePoly(Via) then
+//                    if SplitPlane.GetState_HitPrimitive(Via) then
                     SPRGIter := SplitPlane.GroupIterator_Create;
                     SPRGIter.AddFilter_IPCB_LayerSet(PLayerSet);
                     SPRGIter.AddFilter_ObjectSet(MkSet(eRegionObject));
@@ -368,7 +377,6 @@ begin
     EndHourGlass;
 
     Board.ViewManager_FullUpdate;
-//    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
 end;
 
 
@@ -378,37 +386,18 @@ var
     Iterator  : IPCB_BoardIterator;
     Violation : IPCB_Violation;
     Via       : IPCB_Via;
-    VObjList  : TObjectList;
-    I         : integer;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
 
-    VObjList := TObjectList.Create;
-    VObjList.OwnsObjects := false;
+    PCBServer.PreProcess;
+    Board.BeginModify;
 
     Iterator := Board.BoardIterator_Create;
-    Iterator.AddFilter_ObjectSet(MkSet(eViolationObject));
-    Iterator.AddFilter_LayerSet(AllLayers);
-    Iterator.AddFilter_Method(eProcessAll);
-
-    Violation := Iterator.FirstPCBObject;
-    while Violation <> Nil do
-    begin
-        VObjList.Add(Violation);
-        Violation := Iterator.NextPCBObject;
-    end;
-    for I := 0 to (VObjList.Count - 1) do
-    begin
-        Violation := VObjList.Items(I);
-        Board.RemovePCBObject(Violation);
-        PCBServer.DestroyPCBObject(Violation);
-    end;
-    VObjList.Destroy;
-
     Iterator.AddFilter_ObjectSet(MkSet(eViaObject));
     Iterator.AddFilter_LayerSet(AllLayers);
+
     Via := Iterator.FirstPCBObject;
     while (Via <> nil) do
     begin
@@ -418,6 +407,8 @@ begin
     end;
     Board.BoardIterator_Destroy(Iterator);
 
+    Board.EndModify;
+    PCBServer.PostProcess;
     Board.ViewManager_FullUpdate;
     Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
 end;
