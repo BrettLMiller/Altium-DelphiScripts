@@ -4,6 +4,7 @@
 
 Author : BL Miller
 20231214 : 0.1  POC
+20231217 : 0.11 set net override colour to Pads&Vias & highlight (select)
 
 TBD: use NetViaAntenna.pas code to detect connection to primitives on Layer.
 
@@ -30,14 +31,11 @@ var
     NetName     : WideString;
     CMPRefDes   : WideString;
     bRemoved    : boolean;
-    IPCB_Via.AllowGlobalEdit ;
+    IPCB_Via;
     IPCB_Pad;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
-    PCBLib := PCBServer.GetCurrentPCBLibrary;
-    if PCBLib <> nil then
-        Board := PCBLib.Board;
     if Board = nil then exit;
 
     MLayerStack := Board.MasterLayerStack;
@@ -85,7 +83,17 @@ begin
 
             if bRemoved then
             begin
-                PV.Selected := true;
+                if PV.InNet then
+                begin
+                    ANet.OverrideColorForDraw := true;
+                 //   ANet.LiveHighlightMode := eHighlight_Thicken;  // Dim;
+                 //   ANet.SetState_IsHighlighted(true);
+                 //   Board.AddObjectToHighlightObjectList(ANet);
+                end;
+
+                Board.AddObjectToHighlightObjectList(PV);
+
+//                PV.Selected := true;
 //                ShowMessage('PV pad removed : ' + PV.Descriptor + '  ' + Layer2String(Layer));
                 Report.Add(PV.Descriptor + ' | ' + Layer2String(Layer) + ' | ' + CMPRefDes + ' | ' + NetName);
             end;
@@ -96,6 +104,35 @@ begin
         PV := BIterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(BIterator);
+    Board.GraphicallyInvalidate;
+    Board.SetState_Navigate_HighlightObjectList(eHighlight_Dim, true);
+
+    Board.ViewManager_FullUpdate;
 
     Report.SaveToFile(ExtractFilePath(Board.FileName) + 'PV-pad-removedreport.txt' );
+end;
+
+procedure UnHighlightNets;
+var
+    BIterator   : IPCB_BoardIterator;
+    ANet        : IPCB_Net;
+begin
+    Board  := PCBServer.GetCurrentPCBBoard;
+    if Board = nil then exit;
+    BIterator := Board.BoardIterator_Create;
+    BIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
+    BIterator.AddFilter_ObjectSet(MkSet(eNetObject));
+    ANet := Biterator.FirstPCBObject;
+    while ANet <> nil do
+    begin
+        ANet.OverrideColorForDraw := false;
+        ANet.LiveHighlightMode := eHighlight_Graph;
+        ANet.SetState_IsHighlighted(false);
+        ANet.GraphicallyInvalidate;
+        ANet.ShowNetConnects;
+        ANet := BIterator.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(BIterator);
+    Board.GraphicallyInvalidate;
+    Board.ViewManager_FullUpdate;
 end;
