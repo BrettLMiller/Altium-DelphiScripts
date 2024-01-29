@@ -7,7 +7,8 @@
 
 BL Miller
 06/12/2022  v0.10  POC Export Import Releaser Settings registry entries..
-07/12/2022  v0.11  Store RegDataInfo in the export ini file & use for import if missing in Registry. 
+07/12/2022  v0.11  Store RegDataInfo in the export ini file & use for import if missing in Registry.
+2024-01-29  v0.20  Report the Releaser projects that are stored that in Registry.
 
 AD23 is planning to move/store Releaser Settings info inside each Project.
 
@@ -33,24 +34,28 @@ const
 
     cRegistrySubPath3 = 'Project Release';            
 
+// report default Releaser settings
 // specific keys ..Software\Altium\\SpecialKey\Project Release\
     csItemKeys2    = 'Release Settings';
-
 // export sections
-    csSectKeys3    = 'Naming Template';
+    csSectKeys3    = 'Naming Template|Preferred Action';
     csExportPrefix = 'EXP_';
     cFilterFile    = 'ReleaserSettings.ini';
     csRegDataInfo  = '_RegDataInfo';
 
+// list project info stored
+// specific keys ..Software\Altium\\SpecialKey\Project Release\
+    csSectKeys4    = 'Project Settings|Project Target Folders';
+// sections here are dynamic, must be read
 
 // Root keynameN to import from ini & writing to registry.
-   cStringKeyRoots = 'Naming Template';   // this version only supports a single entry
+    cStringKeyRoots = 'Naming Template';        // this version only supports a single entry
 
 
 var
     Registry         : TRegistry;
     RegDataInfo      : TRegDataInfo;
-    SectKeyList      : TStringlist;
+    SectKeyList      : TStringlist;       // unused.
     SectDataInfo     : TStringList;
     SubSectList      : TStringlist;
     ItemKeyList      : TStringList;
@@ -68,6 +73,111 @@ function  RegistryReadKeyType (const SKey : WideString, const IKey : Widestring)
 function  RegistryWriteInteger(const SKey : Widestring, const IKey : WideString, const IVal : Integer) : boolean;    forward;
 function  RegistryWriteString (const SKey : Widestring, const IKey : WideString, const IVal : WideString) : boolean; forward;
 procedure ItemPathToSection   (var SPath, var KPath : WideString); forward;
+
+procedure ListReleasedProjects;
+var
+    SectKey    : WideString;
+    SubSectKey : WideString;
+    SectList   : TStringList;
+    ItemKey    : WideSting;
+    ValueList  : TStringList;
+    KeyValue   : WideString;
+    I, J, k, L : integer;
+
+begin
+    Project := GetWorkSpace.DM_FocusedProject;
+    FilePath := ExtractFilePath(Project.DM_ProjectFullPath);
+    if (Project.DM_ProjectFullPath = 'Free Documents') or (FilePath = '') then
+        FilePath :=  SpecialFolder_MyDocuments;
+
+    Report := TStringList.Create;
+    Registry := TRegistry.Create;   // TRegistry.Create(KEY_WRITE OR KEY_WOW64_64KEY);  KEY_SET_VALUE
+
+    SubSectList := TStringList.Create;
+    ValueList   := TStringList.Create;
+    ValueList.Delimiter := '|';
+    ValueList.StrictDelimiter := true;
+    ItemKeyList := TStringList.Create;
+
+    SectList := TStringList.Create;
+    SectList.Delimiter := '|';
+    SectList.StrictDelimiter := true;
+    SectList.DelimitedText := csSectKeys4;
+
+    SectKey := SpecialKey_SoftwareAltiumApp;
+    Report.Add('Section    : ' + SectKey);
+    Report.Add('');
+
+// FixedSect \ FixedSect \ Var-Sect \ Fixed-Keys : valuedata
+
+    for I := 0 to (SectList.Count - 1) do
+    begin
+//   don't forget the damn separator '\'
+        SectKey     := '\' + SpecialKey_SoftwareAltiumApp + '\' + cRegistrySubPath3 + '\' + SectList.Strings(I);
+        SubSectList := RegistryReadSectKeys(SectKey, false);
+
+        Report.Add('Section: ' + SectList.Strings(I) + '  cnt:' + IntToStr(SubSectList.Count));
+
+        for J := 0 to (SubSectList.Count - 1) do
+        begin
+            SubSectKey := Trim(SubSectList.Strings(J));
+            Report.Add('PRJName: ' + SubSectKey);
+
+            SubSectKey  := SectKey + '\' + SubSectKey;
+            ItemKeyList := RegistryReadSectKeys(SubSectKey, true);
+
+            for k := 0 to (ItemKeyList.Count - 1) do
+            begin
+                ItemKey := Trim(ItemKeyList.Strings(k));
+                ItemPathToSection (SubSectKey, ItemKey);
+                RegDataInfo := RegistryReadKeyType(SubSectKey, ItemKey);
+
+                if (RegDataInfo = rdInteger) then
+                begin
+                    KeyValue := RegistryReadInteger(SubSectKey, ItemKey);
+                    Report.Add('      ' + ItemKey + '  ' + IntToStr(KeyValue) );
+                end else
+                begin
+                    KeyValue := RegistryReadString(SubSectKey, ItemKey);
+                    ValueList.DelimitedText := KeyValue;
+                    if ValueList.Count = 1 then
+                        Report.Add('      ' + ItemKey +  '  ' + KeyValue);
+                    if ValueList.Count <> 1 then
+                    begin
+                        Report.Add('      ' + ItemKey);
+                        for L := 0 to (ValueList.Count - 1) do
+                            Report.Add('            ' + ValueList.Strings(L) );
+                    end;
+                end;
+
+            end;
+            ItemKeyList.Clear;
+        end; //j
+        Report.Add('');
+    end;
+
+    ItemKeyList.Free;
+    SubSectList.Clear;
+    SubSectList.Free;
+    ValueList.Clear;
+    ValueList.Free;
+
+    if Registry <> nil then Registry.Free;
+
+    FilePath := FilePath + '\ReleaserPRJ_Report.Txt';
+    Report.Insert(0, 'Report Releaser Projects found in Registry');
+    Report.SaveToFile(FilePath);
+    Report.Free;
+
+    ReportDocument := Client.OpenDocument('Text', FilePath);
+
+    If ReportDocument <> Nil Then
+    begin
+        Client.ShowDocument(ReportDocument);
+        if (ReportDocument.GetIsShown <> 0 ) then
+            ReportDocument.DoFileLoad;
+    end;
+end;
 
 procedure ImportReleaserSettings;
 Var
@@ -103,20 +213,20 @@ Begin
 
     SectName := cRegistrySubPath3 + '\' + csItemKeys2 + '\' + cStringKeyRoots;
 
-    SectKeyList := TStringList.Create;
-    SectKeyList.Delimiter := '=';
-    SectKeyList.StrictDelimiter := true;
-//    SectKeyList.NameValueSeparator := '=';
+    SubSectList := TStringList.Create;
+    SubSectList.Delimiter := '=';
+    SubSectList.StrictDelimiter := true;
+//    SubSectList.NameValueSeparator := '=';
 
     if IniFile.SectionExists(SectName) then
     begin
 
-        IniFile.ReadSectionValues(SectName, SectKeyList);
+        IniFile.ReadSectionValues(SectName, SubSectList);
 
-        for I := 0 to (SectKeyList.Count - 1) do
+        for I := 0 to (SubSectList.Count - 1) do
         begin
-            KeyName  := SectKeyList.Names(I);
-            KeyValue := SectKeyList.ValueFromIndex(I);
+            KeyName  := SubSectList.Names(I);
+            KeyValue := SubSectList.ValueFromIndex(I);
 
             RegSectKey := SpecialKey_SoftwareAltiumApp + '\' + SectName;
 // determine key type registry
@@ -139,7 +249,7 @@ Begin
     else
         ShowMessage('IniFile does not have this section ' + SectName);
 
-    SectKeyList.Clear;
+    SubSectList.Clear;
     if Registry <> nil then Registry.Free;
     IniFile.Free;
 End;
@@ -153,7 +263,6 @@ Var
     I, J       : integer;
 
 begin
-
     Project := GetWorkSpace.DM_FocusedProject;
     FilePath := ExtractFilePath(Project.DM_ProjectFullPath);
     if (Project.DM_ProjectFullPath = 'Free Documents') or (FilePath = '') then
@@ -210,6 +319,7 @@ begin
     end;
 
     ItemKeyList.Free;
+    SubSectList.Clear;
     IniFile.Free;
 
     if Registry <> nil then Registry.Free;
