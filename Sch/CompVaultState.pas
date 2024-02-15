@@ -1,7 +1,7 @@
 { CompVaultState.pas
+   Operates on SchLib or SchDoc components.
 
    Reports the Vault & other revision status properties of Sch component
-   If CMP is selected then display pop-up ShowMessage()
 
    Can blank the VaultGUID from component & the models;
    This disconnects the component from Vault
@@ -12,18 +12,21 @@ BL Miller.
 
 20/08/2021  v0.10 from RevState.pas
 21/08/2021  v0.11 Add DisconnectCompFromVault() strips VaultGUID from the comp & models
-2023-06-17  v0.12 no code change, clean out private comments/notes.
+2024-02-15  v0.20 Clear ALL GUIDs
 }
 
 const
     bDisplay      = true;
-    cPopup        = false;
+    cMajorVerAD19  = 19;            // this & later versions (currently) have broken ISch_Implementation.
+    cMajorVerAD21  = 21;
 
 var
     WS            : IWorkspace;
     Prj           : IProject;
     CurrentSheet  : ISch_Document;
     ReportInfo    : TStringList;
+    IsLib         : boolean;
+    VerMajor      : integer;
 
 Procedure GenerateReport(Filename : WideString); forward;
 
@@ -41,6 +44,8 @@ var
     Parameter     : ISch_Parameter;
 
     CompName      : TString;
+    LibraryRef    : WideString;
+    DesignItemID  : WideString;
     Comment       : WideString;
     Designator    : ISch_Designator;
     SourceLibName : WideString;
@@ -77,47 +82,48 @@ begin
     // check if the document is a schematic Doc and if not exit.
     If not( (CurrentSheet.ObjectID = eSchLib) or (CurrentSheet.ObjectID = eSheet) ) Then
     Begin
-         ShowError('Please open a schematic SchDoc.');
+         ShowError('Please open a schematic SchDoc or SchLib ');
          Exit;
     End;
 
-    if CurrentSheet.ObjectID = eSheet then
+    IsLib := false;
+    if CurrentSheet.ObjectID = eSchLib then IsLib := true;
+    if IsLib then
+        Iterator := CurrentSheet.SchLibIterator_Create
+    else
         Iterator := CurrentSheet.SchIterator_Create;
-    if CurrentSheet.ObjectID = eSchLib then
-        Iterator := CurrentSheet.SchLibIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
 
     // Create a TStringList object to store data
     ReportInfo := TStringList.Create;
     ReportInfo.Add(CurrentSheet.DocumentName);
     ReportInfo.Add('');
-    ReportInfo.Add( 'Comp Details    Designator   CompName   Comment    SourceLib    UseLibName?   Integ?= ');
+    ReportInfo.Add( 'Comp Details    Designator   LibraryReference   DesignItemId   Comment    SourceLib    UseLibName?   Integ?= ');
 
     Component := Iterator.FirstSchObject;
     While Component <> Nil Do
     Begin
-        Popup := cPopup;
-        if (Component.Selection = true) then           ISCH_Designator.
+        Popup := false;
+        if (Component.Selection = true) then
             Popup := true;
 
-        if CurrentSheet.ObjectID = eSchLib then
-            CompName := Component.LibReference
-        else
-            CompName := Component.DesignItemId;
-
         Designator := Component.Designator;
-        Comment := Component.Comment.Text;
+        Comment    := Component.Comment.Text;
 
-        SourceLibName  := Component.SourceLibraryName;
-//        IsVault := Component.IsVaultComponent;
-        IsInteg    := Component.IsIntegratedComponent;
-        UseLibName := Component.UseLibraryName;
+        LibraryRef   := Component.LibReference;
+        DesignItemID := Component.DesignItemId;
 
-    //    SourceDBLibName := Component.DatabaseLibraryName;
-    //    DBTableName     := Component.DatabaseTableName;
-    //    Component.UseDBTableName := True;
+        if IsLib then
+            CompName := LibraryRef
+        else
+            CompName := DesignItemID;
 
-        ReportInfo.Add( 'Comp Details ' + Designator.Text + ' ' +  CompName + ' ' + Comment + '  SourceLib ' + SourceLibName + ' : UseLibName=' + IntToStr(UseLibName) + '  Integ?=' + IntToStr(IsInteg) + '  ' );
+        SourceLibName := Component.SourceLibraryName;
+        IsVault       := not Component.IsUnmanaged;
+        IsInteg       := Component.IsIntegratedComponent;
+        UseLibName    := Component.UseLibraryName;
+
+        ReportInfo.Add( 'Comp Details ' + Padright(Designator.Text,5) + '  LR ' + Padright(LibraryRef,20) + '  DID ' + DesignItemID + '  ' + Comment + '  SourceLib ' + SourceLibName + ' : UseLibName=' + IntToStr(UseLibName) + '  Integ?=' + IntToStr(IsInteg) + '  ' );
 
         SymRef       := Component.SymbolReference;
         SymItemGUID  := Component.SymbolItemGUID;
@@ -127,7 +133,7 @@ begin
             ShowMessage('Symbol Details ' + SymRef + '  GUID=' + SymItemGUID + '  RevGUID=' + SymRevGUID + '  VGUID='  + SymVaultGUID);
         ReportInfo.Add( 'Symbol Details ' + SymRef + '  GUID=' + SymItemGUID + '  RevGUID=' + SymRevGUID + '  VGUID='  + SymVaultGUID);
 
-        ItemGUID   := Component.ItemGUID;    // widestring
+        ItemGUID   := Component.ItemGUID;          // widestring
         RevDetails := Component.RevisionDetails;   // description
         RevStatus  := Component.RevisionStatus;
         RevState   := Component.RevisionState;     // as listed in Explorer
@@ -154,9 +160,6 @@ begin
             ModelItemGUID  := SchImpl.ModelItemGUID;
             ModelVaultGUID := SchImpl.ModelVaultGUID;
 
-            SchImpl.GetState_DatabaseModel;
-            SchImpl.GetState_IntegratedModel;
-
             ReportInfo.Add(' Model detail  Name: ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +  '  old VaultGUID=' + ModelVaultGUID);
 
             SchImpl := ImplIterator.NextSchObject;
@@ -168,12 +171,10 @@ begin
     End;
 
     CurrentSheet.SchIterator_Destroy(Iterator);
-// bizzarely CurrentLib.SchLibIterator_Destroy(Iterator) does not exist.
 
     ReportInfo.Insert(0,'SchDoc/Lib Comp Revision GUID Report');
     ReportInfo.Insert(1,'------------------------------');
     GenerateReport('SchRevReport.txt');
-
     ReportInfo.Free;
 end;
 
@@ -185,7 +186,10 @@ var
     ImplIterator  : ISch_Iterator;
 
     CompName      : TString;
+    LibraryRef    : WideString;
+    DesignItemID  : WideString;
     SourceLibName : WideString;
+    IsManaged     : boolean;
 
     ItemGUID      : WideString;
     VaultGUID     : WideString;
@@ -207,10 +211,14 @@ begin
          Exit;
     End;
 
-    if CurrentSheet.ObjectID = eSheet then
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion,0);
+
+    IsLib := false;
+    if CurrentSheet.ObjectID = eSchLib then IsLib := true;
+    if IsLib then
+        Iterator := CurrentSheet.SchLibIterator_Create
+    else
         Iterator := CurrentSheet.SchIterator_Create;
-    if CurrentSheet.ObjectID = eSchLib then
-        Iterator := CurrentSheet.SchLibIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
 
     // Create a TStringList object to store data
@@ -221,20 +229,29 @@ begin
     Component := Iterator.FirstSchObject;
     While Component <> Nil Do
     Begin
+        LibraryRef   := Component.LibReference;
+        DesignItemID := Component.DesignItemId;
 
-        if CurrentSheet.ObjectID = eSchLib then
-            CompName := Component.LibReference
+        if IsLib then
+            CompName := LibraryRef
         else
-            CompName := Component.DesignItemId;
+            CompName := DesignItemID;
 
         ItemGUID   := Component.ItemGUID;
         VaultGUID  := Component.VaultGUID;
         VaultHRID  := Component.VaultHRID;
 
+        if (VerMajor > cMajorVerAD19) then
+            IsManaged := not Component.IsUnmanaged;  // read only!
+
         ReportInfo.Add('Comp details '+ CompName + '  ItemGUID=' + ItemGUID + ' previous  VaultGUID=' + VaultGUID + '   HRID=' + VaultHRID );
 
+        Component.SetState_SourceLibraryName('');
+        Component.SetState_ItemGUID('');
         Component.SetState_VaultGUID('');
-        Component.Setstate_SourceLibraryName('');
+        Component.SetState_SymbolItemGUID('');
+        Component.SetState_SymbolRevisionGUID('');
+        Component.SetState_SymbolVaultGUID('');
 
         ImplIterator := Component.SchIterator_Create;
         ImplIterator.AddFilter_ObjectSet(MkSet(eImplementation));
@@ -245,9 +262,6 @@ begin
             ModelName      := SchImpl.ModelName;
             ModelItemGUID  := SchImpl.ModelItemGUID;
             ModelVaultGUID := SchImpl.ModelVaultGUID;
-
-            SchImpl.GetState_DatabaseModel;
-            SchImpl.GetState_IntegratedModel;
 
             ReportInfo.Add(' Model detail  Name: ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +  '  old VaultGUID=' + ModelVaultGUID);
 
