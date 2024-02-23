@@ -24,6 +24,7 @@ B. Miller
 2023-06-07  v0.18  grow or shrink (shift key) polygon
 2023-06-22  v0.19  attempt to repair polyoutline
 2024-02-23  v0.20  add InputBox for grow/shrink
+2024-02-23  v0.21  refresh PolyGrow if board outline.
 
 tbd:
 Poly Outline heal. think all problems stem from original outline errors (microgaps)
@@ -45,6 +46,7 @@ function PolyIsCCW(OP : IPCB_Polygon) : boolean; forward;
 function RepairPolyOutline(Poly : IPCB_Polygon, GMPC1 : IPCB_GeometricPolygon, GMPC2 : IPCB_GeometricPolygon) : boolean; forward;
 function RepairPolyOutline2(OP, var NP : IPCB_polygon, GD : extended) : boolean; forward;
 function HealPolyOutline(OP : IPCB_Polygon) : boolean;        forward;
+procedure RefreshBoardOutLine; forward;
 
 Var
    Board        : IPCB_Board;
@@ -145,10 +147,14 @@ begin
         Poly.Rebuild;
         Poly.EndModify;
         Poly.GraphicallyInvalidate;
+        PCBServer.PostProcess;
+
+        if Prim.ViewableObjectID = eViewableObject_BoardRegion then
+            RefreshBoardOutLine;
+
         Poly.Selected := true;
 
         ReportLog.Add('Resized Poly defined area : ' + SqrCoordToUnitString(Poly.AreaSize, 0, 7));
-        PCBServer.PostProcess;
 
         if bWasfixed then
             ShowMessage('poly outline fixed, check for small vertices');
@@ -389,7 +395,6 @@ begin
     BOL.GraphicallyInvalidate;
 
 //  required to get outline area to update ?
-
     Board.UpdateBoardOutline;
     Board.RebuildSplitBoardRegions(true);
 
@@ -503,7 +508,7 @@ Begin
     PCBServer.PostProcess;
 End;
 
-Function ModifyPolygonToBoardOutline(var Polygon : IPCB_Polygon) : boolean;
+Function ModifyPolygonFromBoardOutline(var Polygon : IPCB_Polygon) : boolean;
 Var
     BOL     : IPCB_BoardOutline;
     PolySeg : TPolySegment;
@@ -531,17 +536,14 @@ Begin
     Polygon.Rebuild;
 //    Polygon.CopperPourValidate;
     Polygon.EndModify;
-
-//    Polygon.FastSetState_XSizeYSize;
     Polygon.SetState_XSizeYSize;
-    Polygon.BoundingRectangle;
 //  required to get outline area to update!
     Polygon.GraphicallyInvalidate;
     PCBServer.PostProcess;
     Result := true;
 End;
 
-Function ModifyBoardOutlineFromPolygonOutline(const Polygon : IPCB_Polygon, var Board : IPCB_Board) : boolean;
+Function ModifyBoardOutlineFromPolygon(const Polygon : IPCB_Polygon, var Board : IPCB_Board) : boolean;
 Var
     PolySeg : TPolySegment;
     Layer   : TLayer;
@@ -567,14 +569,14 @@ Begin
     End;
 
     BOL.SetState_CopperPourInvalid;
-    BOL.Rebuild;
+//    BOL.RebuildRegion(true,true,true);
     BOL.InValidate;
+    BOL.Rebuild;
     BOL.EndModify;
 
     BOL.SetState_XSizeYSize;
 //  required to get outline area to update ?
     BOL.GraphicallyInvalidate;
-
     Board.UpdateBoardOutline;
     Board.RebuildSplitBoardRegions(true);
     Board.EndModify;
