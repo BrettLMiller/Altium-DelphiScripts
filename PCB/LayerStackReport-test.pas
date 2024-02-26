@@ -640,7 +640,7 @@ begin
         begin
 
             LOUUID := '';
-            if not LegacyMLS then LOUUID := LO.Id;
+            if not LegacyMLS then LOUUID := LayerObj.Id;
  
             Layer  := GetLayerFromLayerObject(SubStack, LayerObj);
             Layer7 := LayerObj.V7_LayerID.ID;
@@ -1005,6 +1005,7 @@ try:-
 
     TempS.Add('');
     if not LegacyMLS then
+    begin
         LSP := GetLayerStackProvider(Board);
         for i := 0 to (LSP.GetLayerStackFeaturesCount - 1) do
         begin
