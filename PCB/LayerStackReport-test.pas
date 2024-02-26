@@ -34,15 +34,16 @@
  29/11/2022 0.64  add use LayerIterator.Layer to avoid TV7_Layer.ID
  15/02/2023 0.65  add 2 more layerkinds Capping & Filling
  2023-07-11 0.66  Implicit PcbLib test, eliminate _V7 methods if possible.
+ 2024-01-08 0.67  LO UUID
+ 2024-02-26 0.70  Crude dump of the missing LSM properties Surface Finish Material etc.
 
          tbd : find way to fix short & mid names if wrong.
                 Use Layer Classes test in AD17 & AD19
                 get the matching stack region names for each substack.
                 IPCB_BoardRegionManager
-                ILayerStackProvider / ILayerStackInfo / GUID
                 Not convinced about Board.LayerPositionInSet(AllLayers, LayerObj) as TV6_LayerSet junk.
 
-NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17-AD23 because it fails over eMech16!
+NOT possible to eliminate use of LayerObject_V7() with MechPairs in AD17-AD18
 Can only iterate the "enabled" board mech layerset.
 AD17 works with 32 mechlayers but the part of API (& UX) do not.
 
@@ -50,7 +51,7 @@ More crappy Altium mess.
 
 TDrillLayerPairType built-in const are wrong; Punched & Laser are swapped.
 
- static values for a dynamic "list" object & then becomes wrong
+If layers are moved in LSM then static values for a dynamic "list" object become wrong
 IPCB_LayerObject.V7_LayerID.ID
 IPCB_LayerObject.V6_LayerID
 IPCB_LayerObject.GetState_LayerDisplayName(eLayerNameDisplay_Short)
@@ -131,7 +132,7 @@ var
     MechLayerPairs : IPCB_MechanicalLayerPairs;
     MechLayerPair  : TMechanicalLayerPair;
     MechPairIndex  : integer;
-    VerMajor       : WideString;
+    VerMajor       : integer;
     LegacyMLS      : boolean;
     MaxMechLayers  : integer;
     Layer          : TLayer;
@@ -147,7 +148,6 @@ var
 function LayerClassName (LClass : TLayerClassID) : WideString;                  forward;
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;       forward;
 function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;                forward;
-function Version(const dummy : boolean) : TStringList;                          forward;
 function FindAllMechPairLayers(LayerStack : IPCB_MasterLayerStack;, MLPS : IPCB_MechanicalLayerPairs) : TStringList; forward;
 function GetLayerSetCamViewNumber(Layer : Tlayer) : integer;                                 forward;
 function GetLayerFromLayerObject(LS: IPCB_LayerStack, LayerObj : IPCB_LayerObject) : TLayer; forward;
@@ -233,10 +233,10 @@ begin
     end;
 
 // tbd surface finish   customData ??
-//   Process
-//   Material
-//   Material.Color
-//   Thickness
+// methods may all be read-only, may need to write xml file.
+// LSP := GetLayerStackProvider(Board);
+// LSI := LSP.GetLayerStackInfo(i)
+// Process Material Material.Color Thickness
 
     ReportLog.Add('O:NLID   OName  NewName  IsSig IsPl SI PN DI   ');
 
@@ -580,7 +580,7 @@ var
     Plane       : IPCB_InternalPlane;
     i           : Integer;
     temp        : integer;
-
+    LOUUID      : WideString;
     LayerPos    : integer;
     LayerPosS   : WideString;
     Thickness   : WideString;
@@ -638,6 +638,10 @@ begin
 
         While (LayerObj <> Nil ) do
         begin
+
+            LOUUID := '';
+            if not LegacyMLS then LOUUID := LO.Id;
+ 
             Layer  := GetLayerFromLayerObject(SubStack, LayerObj);
             Layer7 := LayerObj.V7_LayerID.ID;
 //            Board.LayerStack.LayerObject(Layer7).SetState_LayerID(Layer7);
@@ -659,10 +663,10 @@ begin
             IsPlane  := LayerUtils.IsInternalPlaneLayer(Layer);
             IsSignal := LayerUtils.IsSignalLayer(Layer);
 
-            LayerUtils.IsElectricalLayer(27);            // AD17 Mid Layer26
+{            LayerUtils.IsElectricalLayer(27);            // AD17 Mid Layer26
             LayerUtils.AsString(196608);  // 16973824); // 33619963);
             LayerUtils.FromString('Top Surface Finish');  // AD17=0
-
+}
             if false then
             for I:= 2010000 to 2020000 do
             begin
@@ -745,7 +749,8 @@ begin
                       + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 13) // + '  ' + PadRight(LongLName, 20)
                       + '  ' + PadRight(BoolToStr(IsPlane,true), 6) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
                       + PadLeft(IntToStr(Layer), 9) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true), 6)
-                      + PadRight(DieTypeS, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7));
+                      + PadRight(DieTypeS, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + PadRight(DieConst,5) + ' GI:' + IntToStr(LAddress) + ':' + IntToHex(LAddress,7)
+                      + ' | ' + LOUUID );
 
             LayerObj := SubStack.Next(Layerclass, LayerObj);
             Inc(i);
@@ -772,12 +777,18 @@ var
     LSR         : TObjectList;
     LowLayer, HighLayer : IPCB_LayerObject;
     LowPos,   HighPos   : integer;
-    i           : integer;
+    i, j, k     : integer;
     FileName    : String;
     XLayers     : string;
     LSLIndex    : integer;
     Layer6      : TV6Layer;
     slCustom    : TStringList;
+    LSP         : IPCB_LayerStackProvider;
+    LSFI        : ILayerStackFeatureInfo;
+    LSI         : ILayerStackInfo;
+    LayerInfo   : ILayerInfo;
+    LSLProperty : WideString;
+    LSCPValue   : WideString;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
@@ -789,11 +800,12 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
-    VerMajor := Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0); // Version(true).Strings(0);
+
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
-    if (StrToInt(VerMajor) >= AD19VersionMajor) then
+    if (VerMajor >= AD19VersionMajor) then
     begin
         LegacyMLS     := false;
         MaxMechLayers := AD19MaxMechLayers;
@@ -834,6 +846,7 @@ begin
         begin
             BR := LSR.Items(i);
             BR.Descriptor;
+            BR.HoleCount;
             BR.Identifier;
             BR.Index;
             BR.Detail;
@@ -990,6 +1003,41 @@ try:-
         LayerObj := MLayerStack.Next(eLayerClass_Electrical, LayerObj);
     end;
 
+    TempS.Add('');
+    if not LegacyMLS then
+        LSP := GetLayerStackProvider(Board);
+        for i := 0 to (LSP.GetLayerStackFeaturesCount - 1) do
+        begin
+            LSFI := LSP.GetLayerStackFeatures(i);         //ILayerStackFeatureInfo
+            LSFI.GetState_GUID;
+            LSFI.GetState_IsDefault;
+            LSFI.GetState_IsHidden;
+            LSFI.GetState_Name;
+        end;
+
+        TempS.Add('idx|  Name                   |  TypeID                                |  GUID                                   | Material ');
+        for i := 0 to (LSP.GetLayerStacksCount - 1) do
+        begin
+            LSI := LSP.GetLayerStackInfo(i);              //ILayerStackInfo
+            LSI.GetState_Name;
+            LSI.GetState_TotalThickness;
+            LSI.GetLayersCount;
+            for j := 0 to (LSI.GetLayersCount - 1) do
+            begin
+                LayerInfo := LSI.GetLayerInfo(j);         // ILayerInfo
+                TempS.Add(PadRight(LayerInfo.GetState_Number,3) + '|' + PadRight(LayerInfo.GetState_Name,25) + '|' + PadRight(LayerInfo.GetState_TypeId,40) + '|' + PadRight(LayerInfo.GetState_GUID,40) + ' | ' + LayerInfo.GetState_Material);
+                for k := 0 to (LSI.GetLayerPropertiesCount - 1) do
+                begin
+                    LSLProperty := LSI.GetLayerProperty(k);
+                    LSCPValue   := LayerInfo.GetState_CustomProperty(LSLProperty);
+                    if LSCPValue <> '' then
+                        TempS.Add(LSLProperty + '|' + LSCPValue);
+                end;
+            end;
+            TempS.Add('');
+        end;
+    end;
+
     FileName := GetWorkSpace.DM_FocusedDocument.DM_FullPath;
     if ExtractFilePath(FileName) = '' then FileName := SpecialFolder_Temporary;
     FileName := ExtractFilePath(FileName) + '\layerstacktests.txt';
@@ -1025,14 +1073,6 @@ begin
     eLayerClass_PasteMask     : Result := 'Paste Mask';
     else                        Result := 'Unknown';
     end;
-end;
-
-function Version(const dummy : boolean) : TStringList;
-begin
-    Result := TStringList.Create;
-    Result.Delimiter := '.';
-    Result.Duplicates := dupAccept;
-    Result.DelimitedText := Client.GetProductVersion;
 end;
 
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;
@@ -1137,7 +1177,7 @@ begin
         end;
     end;
 end;
-
+                                                            // cardinal      V7 LayerID
 function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
 begin
     if LegacyMLS then
