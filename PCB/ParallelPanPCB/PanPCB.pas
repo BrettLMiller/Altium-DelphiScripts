@@ -34,6 +34,7 @@ Author BL Miller
 20230622   0.29 support project searchpath (partially).
 20230625   0.30 support load source PcbLib from DBLib, deselect FP after open PcbLib.
 20230623   0.31 check if DBLib sourcelib already open.
+20240309   0.32 fix Pan&Scan for parallel PcbLibs.
 
 tbd:
 set same current layer      ; seems not to work with scope & is TV7_layer.
@@ -43,98 +44,156 @@ SetState_CurrentLayer does not exist, & .CurrentLayer appears to fail to set oth
 }
 const
     cLongTrue     = -1;
-    cEnumBoardRef = 'Board Origin|Bottom Left|Centre';
-    cNone   = 0;
-    cPcbDoc = 1;
-    cPcbLib = 2;
+    cEnumBoardRef = 'Board Origin|Bottom Left|Centre|Zoom';
+    cRefZoom    = 3;
+    cRefBOrigin = 0;
+    cRefBLeft   = 1;
+    cRefCentre  = 2;
     cInitSearchPath = 'c:\Altium';
-    cIgnoreLibName = 'Simulation';
+    cIgnoreLibName  = 'Simulation';
 
 function FocusedPCB(dummy : integer) : boolean;             forward;
 function FocusedLib(dummy : integer) : boolean;             forward;
+function FocusedDocType(dummy : integer) : WideString;      forward;
 function RefreshFocus(dummy : integer) : boolean;           forward;
+function GetCurrentFPName(var PcbLibName : WideString) : widestring; forward;
 function AllPcbDocs(dummy : integer) : TStringList;         forward;
 function AllPcbLibs(dummy : integer) : TStringList;         forward;
 function PanOtherPCBDocs(dummy : integer) : boolean;        forward;
 function PanOtherPcbLibs(dummy : integer) : boolean;        forward;
 function OpenPcbLibs(dummy : integer) : boolean;            forward;
-function GetLoadPcbLibByPath(LibPath : Widestring, const Load : boolean) : IPCB_Library;  forward;
-function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;         forward;
-function FindAllOtherPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument; forward;
-function PrjSearchPaths(Prj : IProject, FileName : WideString) : TStringlist;             forward;
-function FindInstallLibraryPath(LibName : WideString, LibKind : TLibKind) : WideString;   forward;
-Function LibraryType (LibPath : WideString) : ILibraryType; forward;
-function GetViewRect(APCB : IPCB_Board) : TCoordRect;       forward;
-function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect;     forward;
-function IsFlipped(dummy : integer) : boolean;              forward;
-function FindLayerObj(ABrd : IPCB_Board, Layer : TLayer) : IPCB_LayerObject;              forward;
-function ClearBoardSelections(ABrd : IPCB_Board) : boolean; forward;
+function GetLoadPcbLibByPath(LibPath : Widestring, const Load : boolean) : IPCB_Library;     forward;
+function FindPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;            forward;
+function FindAllOtherPrjDocByFileName(Prj : IProject, FileName : WideString) : IDocument;    forward;
+function PrjSearchPaths(Prj : IProject, FileName : WideString) : TStringlist;                forward;
+function FindInstallLibraryPath(LibName : WideString, LibKind : TLibKind) : WideString;      forward;
+function LibraryType (LibPath : WideString) : ILibraryType;       forward;
+function GetCursorView (dummy : integer) : TCoordPoint;           forward;
+function GetViewRect(APCB : IPCB_Board) : TCoordRect;             forward;
+function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, const IsLib : boolean) : TCoordRect; forward;
+function IsFlipped(dummy : integer) : boolean;                    forward;
+function FindLayerObj(ABrd : IPCB_Board, Layer : TLayer) : IPCB_LayerObject;                 forward;
+function ClearBoardSelections(ABrd : IPCB_Board) : boolean;       forward;
 
 var
     CurrentPCB     : IPCB_Board;
     CurrentLib     : IPCB_Library;
+    CurrentBoard   : IPCB_Board;
+    CurrentFName   : WideString;
     CurrentServDoc : IServerDocument;
     CurrentCMP     : IPCB_Component;
-    CurrentPLC     : IPCB_LibComponent;
+    CurrentPLC     : IPCB_LibComponent;    //the focused PcbLib Component
+    CurrentGVPR    : TCoordRect;
+    CurrentCPoint  : TCoordPoint;
+    LastCMPName    : WideString;
+    CMPPcbLib      : widestring;
     slBoardRef     : TStringList;
     BrdList        : TStringlist;
     PcbLibList     : TStringlist;
     iBoardRef      : integer;
-    bSameScale     : boolean;
+    bViewPChange   : boolean;
+    bCMPChange     : boolean;
     bCenterCMP     : boolean;
-    iDocKind       : integer;
     bExactLibName  : boolean;
     bOpenLibs      : boolean;
     bAnyLibPath    : boolean;
-    bDeselectFP    : boolean;
+    bIgnoreSelFP   : boolean;
     SearchPath     : Widestring;
 
 procedure PanPCBs;
+var
+    dummy : WideString;
 begin
     If Client = Nil Then Exit;
     if not Client.StartServer('PCB') then exit;
     If PcbServer = nil then exit;
 
     slBoardRef := TStringList.Create;
-    slBoardRef.Delimiter := '|';
+    slBoardRef.Delimiter       := '|';
     slBoardRef.StrictDelimiter := true;
-    slBoardRef.DelimitedText := cEnumBoardRef;
-    iDocKind      := cNone;
-    bExactLibName := true;
-    bOpenLibs     := false;
-    bAnyLibPath   := false;
-    SearchPath    := cInitSearchPath;
-    CurrentPCB    := nil;
-    CurrentLib    := nil;
-    CurrentCMP    := nil;
-    CurrentPLC    := nil;
-    bSameScale    := false;
-    bCenterCMP    := true;
-    bDeselectFP   := false;
-    iBoardRef     := 0;
+    slBoardRef.DelimitedText   := cEnumBoardRef;
+    bExactLibName  := true;
+    bOpenLibs      := false;
+    bAnyLibPath    := false;
+    SearchPath     := cInitSearchPath;
+    CurrentServDoc := nil;
+    CurrentPCB     := nil;
+    CurrentBoard   := nil;
+    CurrentFName   := 'no file';
+    CurrentLib     := nil;
+    CurrentCMP     := nil;
+    CurrentPLC     := nil;
+    CurrentGVPR    := TCoordRect;
+    CurrentCPoint  := TCoordPoint;
+    LastCMPName    := '';
+    CMPPcbLib      := '';
+    bViewPChange   := true;
+    bCMPChange     := true;
+    bCenterCMP     := true;
+    bIgnoreSelFP   := false;
+    iBoardRef      := cRefBOrigin;
+    dummy          := '';
 
     RefreshFocus(1);
     ShowForm(1);
 end;
 
-function PanProcessAll(dummy : integer) : boolean;
-var
-    Found : boolean;
-begin
-    PanOtherPCBDocs(1);
-    Found := PanOtherPcbLibs(1);
-    if not Found then
-        OpenPcbLibs(1);
-end;
-
 function RefreshFocus(dummy : integer) : boolean;
+var
+    Focused  : boolean;
+    FPName   : WideString;
+    LastGVPR : TCoordRect;
 begin
     Result := false;
     BrdList    := AllPcbDocs(1);
     PcbLibList := AllPcbLibs(1);
-    FocusedPCB(1);
-    FocusedLib(1);
-    Result := true;
+
+    Focused := FocusedPCB(1);
+    bIgnoreSelFP := not Focused;
+
+    Focused := FocusedLib(1);
+
+    LastGVPR := CurrentGVPR;
+
+// also updates ViewPort size
+    GetCursorView(1);
+    if bViewPChange then
+        Result := true;
+
+// get any focused FP & its PcbLib
+    FPName := GetCurrentFPName(CMPPcbLib);
+
+// minimise PcbLib focus toggling.
+    bCMPChange := (LastCMPName <> FPName);
+    LastCMPName := FPName;
+end;
+
+function PanProcessAll(dummy : integer) : boolean;
+var
+    Found        : boolean;
+    FocusDocType : integer;
+begin
+    Found  := true;
+    if CurrentPCB <> nil then
+        PanOtherPCBDocs(1);
+
+    if Not (bViewPChange or bCMPChange) then exit;
+// what if focused PcbDoc is closed & an open PcbLib was never focused.
+    FocusDocType := FocusedDocType(1);
+    if (FocusDocType <> cDocKind_Pcb) and (FocusDocType <> cDocKind_PcbLib) then exit;
+
+    Found := false;
+//    if CurrentLib <> nil then
+    Found := PanOtherPcbLibs(1);
+
+    If CurrentCMP = nil then exit;
+    if not bOpenLibs then exit;
+
+    if not Found then
+    begin    
+        bIgnoreSelFP := true;
+        OpenPcbLibs(1);
+    end;
 end;
 
 function PanOtherPCBDocs(dummy : integer) : boolean;
@@ -162,11 +221,17 @@ var
     bView3D     : boolean;
     CGV    : IPCB_GraphicalView;
     CGVM   : TPCBViewMode;
+//    CWidth, wParam, lParam : integer;
+//    ConfigType : WideString;
+//    Config     : WideString;
 begin
     Result := false;
     CurrentCMP := nil;
-    if CurrentPCB = nil then exit;
+    if CurrentServDoc.BeingClosed = cLongTrue then exit;
 
+// stop previous selection in PcbDoc overriding PcbLib CMP selection.
+// annd allow for PcbLib CMP to hightlight all FP in PcbDocs.
+    if not bIgnoreSelFP then
     if CurrentPCB.SelectecObjectCount > 0 then
     begin
         Prim := CurrentPCB.SelectecObject(0);
@@ -174,8 +239,8 @@ begin
         if Prim.InComponent then CurrentCMP := Prim.Component;
     end;
 
-    if bDeselectFP then
-    if CurrentCMP <> nil then CurrentCMP.Selected := false;
+//    if bIgnoreSelFP then
+//    if CurrentCMP <> nil then CurrentCMP.Selected := false;
 
     CLayer   := CurrentPCB.GetState_CurrentLayer;
     IsMLayer := LayerUtils.IsMechanicalLayer(CLayer);
@@ -206,13 +271,10 @@ begin
             if CurrentCMP <> nil then
             begin
                 ClearBoardSelections(OBrd);
-//                OBrd.SetState_Navigate_HighlightObjectList(eHighlight_Filter,true);
                 OCMP := OBrd.GetPcbComponentByRefDes(CurrentCMP.Name.Text);
                 if OCMP <> nil then
                 begin
                     OCMP.Selected := true;
-//                    OBrd.AddObjectToHighlightObjectList(OCMP);
-//                    OBrd.SetState_Navigate_HighlightObjectList(eHighlight_Thicken,true);
                 end;
             end;
 
@@ -237,33 +299,29 @@ begin
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
 
-//            CGV.SetIs3D(bView3D);                    // partially works
-
             OLayer := OBrd.Getstate_CurrentLayer;
             if (OLayer <> CLayer) then
             begin
-// this section never executes!!
                 OBrd.CurrentLayer := CLayer;
                 OBrd.ViewManager_UpdateLayerTabs;
             end;
 
-            OVR := CalcOGVR(CurrentPCB, OBrd, iBoardRef);
-
-            if bCenterCMP and (OCMP <> nil) then
+            if bViewPChange then
             begin
-                OBO := Point(OCMP.X, OCMP.Y);
-                OBrd.GraphicalView_ZoomOnRect(OBO.X - RectWidth(OVR)/2, OBO.Y - RectHeight(OVR)/2,
-                                              OBO.X + RectWidth(OVR)/2, OBO.Y + RectHeight(OVR)/2);
-            end
-            else OBrd.GraphicalView_ZoomOnRect(OVR.X1, OVR.Y1, OVR.X2, OVR.Y2);
-            OBrd.GraphicalView_ZoomRedraw;
+                OVR := CalcOGVR(CurrentBoard, OBrd, false);
 
+                if bCenterCMP and (OCMP <> nil) then
+                begin
+                    OBO := Point(OCMP.X, OCMP.Y);
+                    OBrd.GraphicalView_ZoomOnRect(OBO.X - RectWidth(OVR)/2, OBO.Y - RectHeight(OVR)/2,
+                                                  OBO.X + RectWidth(OVR)/2, OBO.Y + RectHeight(OVR)/2);
+                end else
+                    OBrd.GraphicalView_ZoomOnRect(OVR.X1, OVR.Y1, OVR.X2, OVR.Y2);
+                OBrd.GraphicalView_ZoomRedraw;
+            end;
             Result := true;
         end;
     end;
-
-    PCBServer.GetPCBBoardByBoardID(CurrentPCB.BoardID);
-    CurrentServDoc.Focus;
 end;
 
 function PanOtherPcbLibs(dummy : integer) : boolean;
@@ -272,18 +330,21 @@ var
     OLib       : IPCB_Library;
     LibCMP     : IPCB_LibComponent;
     SLibName   : WideString;
-    LCMPName   : Widestring;
     I          : integer;
+    OVR        : TCoordRect;
+    OBO        : TCoordPoint;
 begin
     Result := false;
 // PcbLibs open
-    If CurrentCMP = nil then exit;
- 
     for I := 0 to (PcbLibList.Count -1 ) do
     begin
-        LCMPName := '';
         ServDoc  := PcbLibList.Objects(I);
-        SLibName := ExtractFileName(CurrentCMP.SourceFootprintLibrary);
+        if ServDoc.BeingClosed = cLongTrue then continue;
+
+        OLib := GetLoadPcbLibByPath(ServDoc.FileName, false);
+        If (OLib.LibraryID = CurrentLib.LibraryID) then continue;
+
+        SLibName := ExtractFileName(CMPPcbLib);
 
 // indirect to sourcelib
         if LibraryType(SLibName) = eLibDatabase then
@@ -296,26 +357,23 @@ begin
         if SLibName <> ExtractFileName(ServDoc.FileName) then
             continue;
 
-// this should have been handled by OpenPcbLib?
-        OLib := GetLoadPcbLibByPath(ServDoc.FileName, bOpenLibs);
-        Client.ShowDocument(ServDoc);
+        OLib := GetLoadPcbLibByPath(ServDoc.FileName, false);
 
-// does comp FP exist in ths library?
-        if OLib <> nil then
-            LCMPName := OLib.GetUniqueCompName(CurrentCMP.Pattern);
-
-        if LCMPName <> '' then
-        if LCMPName <> CurrentCMP.Pattern then
+        LibCMP := OLib.GetComponentByName(LastCMPName);
+        if bCMPChange then
         begin
-            LibCMP := OLib.GetComponentByName(CurrentCMP.Pattern);
             if LibCMP <> nil then
             begin
-                Servdoc.Focus;
                 OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
                 LibCMP.Board.ViewManager_FullUpdate;
-                Result := true;
             end;
         end;
+        if bCMPChange or bViewPChange then
+        begin
+            OVR := CalcOGVR(CurrentBoard, OLib.Board, true);
+            OLib.Board.GraphicalView_ZoomOnRect(OVR.X1, OVR.Y1, OVR.X2, OVR.Y2);
+        end;
+        Result := true;
     end;
 end;
 
@@ -325,26 +383,25 @@ var
     LibDoc      : IDocument;
     ServDoc     : IServerDocument;
     OLib        : IPCB_Library;
+    LibCMP      : IPCB_LibComponent;
     LibFileName : WideString;
     LibPath     : Widestring;
+    LCMPName    : Widestring;
     FPLibPath   : Widestring;
     FoundPath   : WideString;
     slFileList  : TStringlist;
-    SearchPath  : WideString;
     bFound      : boolean;
 begin
-    If CurrentCMP = nil then exit;
-    if not bOpenLibs then exit;
 
-    bDeselectFP := true;
-    bFound      := false;
-    LibPath     := '';
-    LibDoc      := nil;
-    ServDoc     := nil;
-    slFileList  := TStringList.Create;
-    FoundPath   := SearchPath;
-    LibFileName := ExtractFileName(CurrentCMP.SourceFootprintLibrary);
-    FPLibPath   := ExtractFilePath(CurrentCMP.SourceFootprintLibrary);
+    bFound       := false;
+    LibPath      := '';
+    LibDoc       := nil;
+    ServDoc      := nil;
+    slFileList   := TStringList.Create;
+    FoundPath    := SearchPath;
+    LibFileName  := ExtractFileName(CurrentCMP.SourceFootprintLibrary);
+    FPLibPath    := ExtractFilePath(CurrentCMP.SourceFootprintLibrary);
+    LCMPName     := CurrentCMP.Pattern;
 // PCBLib not opened
 // this focused project
     Prj := GetWorkspace.DM_FocusedProject;
@@ -408,13 +465,28 @@ begin
     if (ServDoc <> nil) then
     begin
         OLib := GetLoadPcbLibByPath(ServDoc.FileName, true);
-        if OLib <> nil then Result := true;
+        if OLib <> nil then
+        begin
+            LibCMP := OLib.GetComponentByName(LCMPName);
+            if LibCMP <> nil then
+            begin
+                OLib.SetState_CurrentComponent(LibCMP);    //must use else Origin & BR all wrong.
+                LibCMP.Board.ViewManager_FullUpdate;
+            end;
+            Result := true;
+        end;
         Client.ShowDocument(ServDoc);
+//        ServDoc.View(0).Show;
         Servdoc.Focus;
     end;
     slFileList.Clear;
     slFileList.Free;
     Prj.DM_RefreshInWorkspaceForm;
+end;
+
+function ClearLastCMPName(dummy : integer);
+begin
+    LastCMPName := '';
 end;
 
 function GetLoadPcbLibByPath(LibPath : Widestring, const Load : boolean) : IPCB_Library;
@@ -538,23 +610,29 @@ begin
     end;
 End;
 
-function GetCurrentFPName(dummy : integer) : widestring;
+function GetCurrentFPName(var PcbLibName : WideString) : widestring;
 begin
     Result := 'no footprint selected';
-    if iDocKind = cPcbDoc then
+    if FocusedDocType(1) = cDocKind_Pcb then
     if CurrentCMP <> nil then
-        Result := CurrentCMP.Pattern;
-    if iDocKind = cPcbLib then
+    begin
+        Result      := CurrentCMP.Pattern;
+        PcbLibname  := CurrentCMP.SourceFootprintLibrary;
+    end;
+    if FocusedDocType(1) = cDocKind_PcbLib then
     if CurrentPLC <> nil then
-        Result := CurrentPLC.Name;
+    begin
+        Result     := CurrentPLC.Name;
+        PcbLibName := CurrentLib.Board.FileName;
+    end;
 end;
 
 function GetCurrentFPLibraryName(dummy : integer) : widestring;
 var
     SourceCMPLibRef : widestring;
 begin
-    Result := 'no footprint selected';
-    if iDocKind = cPcbDoc then
+    Result := 'no Lib footprint selected';
+    if FocusedDocType(1) = cDocKind_Pcb then
     if CurrentCMP <> nil then
     begin
         SourceCMPLibRef := ExtractFileName(CurrentCMP.SourceLibReference);
@@ -562,7 +640,7 @@ begin
             SourceCMPLibRef := 'NO CompSource LibRef';
         Result := SourceCMPLibRef + ' / ' + ExtractFileName(CurrentCMP.SourceFootprintLibrary);
     end;
-    if iDocKind = cPcbLib then
+    if FocusedDocType(1) = cDocKind_PcbLib then
     if CurrentPLC <> nil then
         Result := 'n/a';
 end;
@@ -582,66 +660,118 @@ begin
         Result := Point(CurrentPCB.XCursor - CurrentPCB.XOrigin, CurrentPCB.YCursor - CurrentPCB.YOrigin);
 end;
 
-function GetCursorView (var FileName : WideString) : TCoordPoint;
+function ViewPortChanged(LastGVPR : TcoordRect) : boolean;
 var
-    HasPCB : boolean;
-    HasLIB : boolean;
+    Magnit : extended;
 begin
-    Result := nil;
-    FileName := 'no focused file';
+    Result := false;
+    Magnit := abs(LastGVPR.X1 - CurrentGVPR.X1) + abs(LastGVPR.X2 - CurrentGVPR.X2);
+    Magnit := abs(LastGVPR.Y1 - CurrentGVPR.Y1) + abs(LastGVPR.Y2 - CurrentGVPR.Y2) + Magnit;
+    if Magnit > 1000 then
+        Result := true;
+end;
+
+function GetCursorView (dummy : integer) : TCoordPoint;
+var
+    Board    : IPCB_Board;
+    HasPCB   : boolean;
+    HasLIB   : boolean;
+    LastGVPR : TCoordRect;
+begin
+    Result       := TPoint;
+    CurrentFName := 'no focused file';
+    LastGVPR     := CurrentGVPR;
 
     HasPCB := FocusedPCB(1);
     HasLIB := FocusedLib(1);
 
     if HasPCB then
     begin
-        Filename := ExtractFileName(CurrentPCB.FileName);
-        Result   := GetCursorPoint(cDocKind_Pcb);
+        CurrentFName  := ExtractFileName(CurrentPCB.FileName);
+        CurrentGVPR   := GetViewRect(CurrentPCB);
+        bViewPChange  := ViewPortChanged(LastGVPR);
+        CurrentCPoint := GetCursorPoint(cDocKind_Pcb);
     end;
     if HasLIB then
     begin
-        Filename := ExtractFileName(CurrentLib.Board.FileName);
-        Result   := GetCursorPoint(cDocKind_PcbLib);
+        Board         := CurrentLib.Board;
+        CurrentFName  := ExtractFileName(Board.FileName);
+        CurrentGVPR   := GetViewRect(Board);
+        bViewPChange  := ViewPortChanged(LastGVPR);
+        CurrentCPoint := GetCursorPoint(cDocKind_PcbLib);
     end;
+end;
+
+function FormGetCursorView(var TBText : widestring) : TCoordPoint;
+begin
+    Result := CurrentCPoint;
+    TBText := CurrentFName;
 end;
 
 function GetViewRect(APCB : IPCB_Board) : TCoordRect;
 begin
     Result := TRect;
+//  seems just same
+//    CWR := CPCB.WindowBoundingRectangle;  // TCoord
     Result := APCB.GraphicalView_ViewportRect;
     Result := RectToCoordRect(Rect(Result.X1 - APCB.XOrigin, Result.Y2 - APCB.YOrigin,
                                    Result.X2 - APCB.XOrigin, Result.Y1 - APCB.YOrigin) );
 end;
 
 // scale new Graph View rect using window sizes, one dimension wins over the other.
-function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, Mode : integer) : TCoordRect;
+//              'C'urrent & 'O'ther 
+function CalcOGVR(CPCB : IPCB_Board, OPCB : IPCB_Board, const IsLib : boolean) : TCoordRect;
 var
-   GVR : TRect;
-   CVR : TCoordRect;
-   OBO : TCoordPoint;
-   CBO : TCoordRect;
+//   BOL : IPCB_BoardOutline;
+   GVR   : TRect;
+   CVR   : TCoordRect;
+   OBO   : TCoordPoint;
+   CBO   : TCoordRect;
    OBBOR : TCoordRect;
    CBBOR : TCoordRect;
+   Mode  : integer;
+   IsFlip : boolean;
+   Rotation : float;
 begin
-    OBBOR := OPCB.BoardOutline.BoundingRectangle;
-    CBBOR := CPCB.BoardOutline.BoundingRectangle;
+    OBBOR := OPCB.BoundingRectangle;   // was BOL. but fails with PcbLib
+    CBBOR := CPCB.BoundingRectangle;
+    GVR := CPCB.GraphicalView_ViewportRect;
 
-    Case Mode of
-    1 : begin   // bottom left
-           OBO := Point(OBBOR.X1, OBBOR.Y1);
-           CBO := Point(CBBOR.X1, CBBOR.Y1);
-        end;
-    2 : begin     // CofMass
-           OBO := Point(OBBOR.X1 + RectWidth(OBBOR)/2, OBBOR.Y1 + RectHeight(OBBOR)/2);
-           CBO := Point(CBBOR.X1 + RectWidth(CBBOR)/2, CBBOR.Y1 + RectHeight(CBBOR)/2);
-        end;
-    else begin    // origin
-           OBO := Point(OPCB.XOrigin, OPCB.YOrigin);
-           CBO := Point(CPCB.XOrigin, CPCB.YOrigin);
-         end;
+// need handle selected PcbDoc CMP flipped or rotated w.r.t PcbLib!
+// ignore reverse case.
+    IsFlip := false;
+    Rotation := 0;
+    if IsLib and (CurrentCMP <> nil) then
+    begin
+        if CurrentCMP.Layer = eBottomLayer then IsFlip := true;
+        Rotation := CurrentCMP.Rotation;
     end;
 
-    GVR := CPCB.GraphicalView_ViewportRect;
+    Mode := iBoardRef;
+
+    Case Mode of
+    cRefBLeft :    // bottom left
+        begin
+            OBO := Point(OBBOR.X1, OBBOR.Y1);
+            CBO := Point(CBBOR.X1, CBBOR.Y1);
+        end;
+    cRefCentre :    // CofMass
+        begin
+            OBO := Point(OBBOR.X1 + RectWidth(OBBOR)/2, OBBOR.Y1 + RectHeight(OBBOR)/2);
+            CBO := Point(CBBOR.X1 + RectWidth(CBBOR)/2, CBBOR.Y1 + RectHeight(CBBOR)/2);
+        end;
+    cRefZoom :
+        begin
+            OBO := Point(OPCB.XOrigin, OPCB.YOrigin);
+            CBO := Point((GVR.X1 + GVR.X2) /2, (GVR.Y1 + GVR.Y2) /2);
+        end;
+    else
+        begin    //     cRefBOrigin = 0
+            OBO := Point(OPCB.XOrigin, OPCB.YOrigin);
+            CBO := Point(CPCB.XOrigin, CPCB.YOrigin);
+        end;
+    end;
+
     CVR := RectToCoordRect(Rect(GVR.X1 - CBO.X, GVR.Y2 - CBO.Y,
                                 GVR.X2 - CBO.X, GVR.Y1 - CBO.Y) );
 
@@ -718,7 +848,7 @@ var
 begin
     Result := TStringlist.Create;
     SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
+    for I := 0 to (SM.DocumentCount - 1) do
     begin
         ServDoc := SM.Documents(I);
         if (ServDoc.Kind = cDocKind_Pcb) then
@@ -737,7 +867,7 @@ begin
     Result := TStringlist.Create;
 
     SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
+    for I := 0 to (SM.DocumentCount - 1) do
     begin
         ServDoc := SM.Documents(I);
         if (ServDoc.Kind = cDocKind_PcbLib) then
@@ -745,29 +875,47 @@ begin
     end;
 end;
 
+function FocusedDocType(dummy : integer) : WideString;
+var
+    Doc : IDocument;
+begin
+    Result := '';
+    Doc := GetWorkspace.DM_FocusedDocument;
+    if Doc <> nil then
+        Result := Doc.DM_DocumentKind;
+end;
+
 function FocusedPCB(dummy : integer) : boolean;
 var
-    SM      : IServerModule;
-    ServDoc : IServerDocument;
-    APCB    : IPCB_Board;
-    I       : integer;
+    SM       : IServerModule;
+    ServDoc  : IServerDocument;
+    Doc      : IDocument;
+    APCB     : IPCB_Board;
+    I        : integer;
 begin
     Result := false;
+    Doc := GetWorkspace.DM_FocusedDocument;
+    SM  := Client.ServerModuleByName('PCB');
+    APCB := PCBServer.GetCurrentPCBBoard;
 
-    SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
+    if Doc <> nil then
+    for I := 0 to (SM.DocumentCount - 1) do
     begin
         ServDoc := SM.Documents(I);
-        if (ServDoc.Kind = cDocKind_Pcb) then
-        if (ServDoc.IsShown = cLongTrue) then
+        if (ServDoc.Kind <> cDocKind_Pcb) then continue;
+        if (ServDoc.IsShown <> cLongTrue) then continue;
+
+        if CurrentServDoc = nil then
+            CurrentServDoc := ServDoc;
+
+        if Doc.DM_FileName = ExtractFileName(ServDoc.FileName) then
         begin
             CurrentServDoc := ServDoc;
-            APCB := PCBServer.GetCurrentPCBBoard;
             if APCB <> nil then
             if APCB.Filename = ServDoc.FileName then
             begin
                 CurrentPCB := APCB;
-                iDocKind := cPcbDoc;
+                CurrentBoard := APCB;
                 Result := true;
             end;
         end;
@@ -778,26 +926,38 @@ function FocusedLib(dummy : integer) : boolean;
 var
     SM      : IServerModule;
     ServDoc : IServerDocument;
-    APCB    : IPCB_Library;
-    I       : integer;
+    Doc  : IDocument;
+    APCB : IPCB_Library;
+    I    : integer;
 begin
     Result := false;
+    Doc := GetWorkspace.DM_FocusedDocument;
+    SM  := Client.ServerModuleByName('PCB');
+    APCB := PCBServer.GetCurrentPCBLibrary;
+    if APCB <> nil then
+        CurrentLib := APCB;
+    if APCB <> nil then
+        CurrentBoard := APCB.Board;
 
-    SM := Client.ServerModuleByName('PCB');
-    for I := 0 to (SM.DocumentCount -1) do
+    if Doc <> nil then
+    for I := 0 to (SM.DocumentCount - 1) do
     begin
         ServDoc := SM.Documents(I);
-        if (ServDoc.Kind = cDocKind_PcbLib) then
-        if (ServDoc.IsShown = cLongTrue) then
-        begin
+        if (ServDoc.Kind <> cDocKind_PcbLib) then continue;
+        if (ServDoc.IsShown <> cLongTrue) then continue;
+
+        if CurrentServDoc = nil then
             CurrentServDoc := ServDoc;
-            APCB := PCBServer.GetCurrentPCBLibrary;
+
+        if Doc.DM_FileName = ExtractFileName(ServDoc.FileName) then
+        begin
+            CurrentPLC := nil;
             if APCB <> nil then
-            if APCB.Board.Filename = ServDoc.FileName then
+            if ExtractfileName(APCB.Board.Filename) = Doc.DM_FileName then
             begin
-                CurrentLib := APCB;
+                CurrentServDoc := ServDoc;
+                CurrentBoard := APCB.Board;
                 CurrentPLC := APCB.GetState_CurrentComponent;
-                iDocKind := cPcbLib;
                 Result := true;
             end;
         end;

@@ -1,7 +1,7 @@
 { PanPCBForm.pas
  part of PanPCB.PrjScr
  linked with PanPCBForm.dfm
- 20230623   0.31 (form 0.27)
+ 20240309   0.32 (form 0.27)
 
 object sbStatusBar : TStatusBar
 sbStatusBar.Panels.Items(0).Text := IntToStr(Key);
@@ -66,12 +66,13 @@ begin
     bOpenLibs     := PanPCBForm.cbOpenLibrary.Checked;
     bAnyLibPath   := PanPCBForm.cbAnyLibPath.Checked;
 
-    PanPCBForm.ebFootprintName.Text := 'no footprint selected';
-    PanPCBForm.ebLibraryName.Text   := ' ';
+    Client.BeginDisableInterface;
 
     RefreshFocus(1);
+//    VC := FormGetCursorView(TBoxText);
+    VC := CurrentCPoint;
+    TBoxText := CurrentFName;
 
-    VC := GetCursorView(TBoxText);
     PanPCBForm.ebCurrentPcbDoc.Text := TBoxText;
     PanPCBForm.ebFootprintName.Text := GetCurrentFPName(1);
     PanPCBForm.ebLibraryName.Text   := GetCurrentFPLibraryName(1);
@@ -82,11 +83,13 @@ begin
     end;
 
     PanProcessAll(1);
+    Client.EndDisableInterface;
 end;
 
 procedure TPanPCBForm.cbOriginModeChange(Sender: TObject);
 begin
     iBoardRef := cbOriginMode.ItemIndex;
+    bViewPChange := true;
 end;
 
 procedure TPanPCBForm.editboxCurrentPcbDocClick(Sender: TObject);
@@ -109,10 +112,25 @@ end;
 
 procedure TPanPCBForm.cbAnyLibPathClick(Sender: TObject);
 begin
+// immediate refresh of any other Doc with matching CMP names
+    if not PanPCBForm.cbAnyLibPath.Checked then bCMPChange := true;
     if not PanPCBForm.cbAnyLibPath.Checked then exit;
     SearchPath := PanPCBForm.XPDirectoryEdit1.Text;
 end;
 
+procedure TPanPCBForm.cbStrictLibraryClick(Sender: TObject);
+begin
+// immediate refresh of any other Doc with matching CMP names
+    if not PanPCBForm.cbStrictLibrary.Checked then bCMPChange := true;;
+    SearchPath := PanPCBForm.XPDirectoryEdit1.Text;
+end;
+
+procedure TPanPCBForm.cbAllowOpenClick(Sender: TObject);
+begin
+// immediate refresh of any other Doc with matching CMP names
+    if PanPCBForm.cbAllowOpen.Checked then bCMPChange := true;;
+    SearchPath := PanPCBForm.XPDirectoryEdit1.Text;
+end;
 
 procedure TPanPCBForm.XPDirectoryEdit1Change(Sender: TObject);
 begin
