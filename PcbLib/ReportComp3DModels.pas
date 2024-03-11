@@ -12,6 +12,7 @@
 27/06/2022  v0.01 POC cut out of other script & rejigged designator pattern reporting.
 03/07/2022  v0.10 refactor PcbLib loop, faster & fix delete extruded models
 2024-03-11  v0.12 report Overall Height
+2024-03-11  v0.13 fix PcbLib origin refresh issue.
 
 
 Model Get XYZ is broken
@@ -110,6 +111,7 @@ begin
         for i := 0 to (PcbLib.ComponentCount - 1) do
         begin
             Footprint := PcbLib.GetComponent(i);
+            PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
 
             CBList := ProcessReportBodies(Footprint, Islib, fix);
             CBList.Clear;
