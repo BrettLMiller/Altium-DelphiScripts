@@ -8,6 +8,7 @@ BL Miller
 01/05/2020  v0.10 POC demo
 ---
 2024-03-09  v0.31 git cleaned strip out non-IntLib.
+2024-03-12  v0.32 add OverallHeight to Model report.
 
 PcbLib 3D model reporting does slow down this script by 2 - 4 x !!
 
@@ -34,9 +35,9 @@ var
     RepFPParaList  : TStringList;
     IntLibMan      : IIntegratedLibraryManager;
 
+procedure IntegLibrary(FullPath : WideString, LibType : integer); forward;
 function GetImplementation (Component : ISCh_Component, ModelName : WideString, ModelType : WideString) : ISch_Implementation; forward;
 function LibraryType (LibPath : WideString) : ILibraryType; forward;
-procedure IntegLibrary(FullPath : WideString, LibType : integer); forward;
 
 Procedure ListTheLibraries;
 var
@@ -118,9 +119,9 @@ Begin
     MReport.DelimitedText := Report.DelimitedText;
     PReport.DelimitedText := Report.DelimitedText;
 
-    Report.Add( 'LibId                        |  Idx ' + ' | ' + PadRight('CompName', 40) + ' | ' + PadRight('Desc',60) + ' | MIdx  | ' + PadRight('Model',40) + ' | Current');
-    MReport.Add('LibId                        |  Idx ' + ' | ' + PadRight('ModelName',50) + ' | ' + PadRight('Description', 50) + ' | Height (mils) | PadCount | SourcePcbLib | 3D Model  |  FileName');
-    PReport.Add('LibId                        |  Idx ' + ' | ' + PadRight('CompName', 40) + ' |PCnt| ' + ReportParameters );
+    Report.Add( 'LibId                          | Idx | ' + PadRight('CompName', 50) + ' | ' + PadRight('Desc',50) + ' |MIdx| ' + PadRight('Model',40) + ' | Current');
+    MReport.Add('LibId                          | Idx | ' + PadRight('ModelName',50) + ' | ' + PadRight('Description', 50) + ' | Height (mil) | PadCount | SourcePcbLib | 3D Model  |  FileName          |  OvlHeight (mm)');
+    PReport.Add('LibId                          | Idx | ' + PadRight('CompName', 50) + ' |PCnt| ' + ReportParameters );
 
     for I := 0 to (IntLibMan.InstalledLibraryCount - 1) Do
     begin
@@ -214,6 +215,7 @@ var
     LC3DModel   : IPCB_Model;
     LC3DModName : WideString;
     LC3DModFN   : WideString;
+    LC3DOvlHeight : TCoord;
 
     LibParaList : TStringList;
     ParaCount   : integer;
@@ -304,10 +306,7 @@ begin
             Report.Add(PadRight(LibId,30) + ' | ' + PadLeft(IntToStr(I+1),3) + ' | ' + PadRight(CompName, 50) + ' | ' + PadRight(CompDesc,50) + ' | ' + PadRight(IntToStr(J+1),2)  + ' | ' + PadRight(ModelName,40) + ' | ' + IntToStr(Current) );
 
             ModelOkay := false;
-            if LibType = eLibIntegrated then
-                If (ModelType.Name = cModelType_PCB) then ModelOkay := true;
-            if LibType = eLibVault then ModelOkay := true;
-
+            If (ModelType.Name = cModelType_PCB) then ModelOkay := true;
 
             if ModelOkay then
             begin
@@ -323,9 +322,10 @@ begin
                                 SourceLib := SchImpl.DatafileLink(0).Location;
                     end;
 
-                    LC3DModName := 'no generic model';
-                    LC3DModFN   := '';
-                    PLComp      := nil;
+                    LC3DModName   := 'no generic model';
+                    LC3DModFN     := '';
+                    LC3DOvlHeight := 0;
+                    PLComp        := nil;
 
                     ModelPath := IntLibMan.FindModelLibraryPath (eLibIdentifierKind_FullPath, Fullpath, CompName, ModelName, cModelType_PCB);
                     if (bRep3DModels) then
@@ -334,9 +334,10 @@ begin
                     if PLComp <> nil then
                     for L := 1 to PLComp.GetPrimitiveCount(MkSet(eComponentBodyObject)) do
                     begin
-                        LC3DBody := PLComp.GetPrimitiveAt(L, eComponentBodyObject);
-                        LC3DModName := LC3DBody.Identifier;
-                        LC3DModel := LC3DBody.Model;
+                        LC3DBody      := PLComp.GetPrimitiveAt(L, eComponentBodyObject);
+                        LC3DOvlHeight :=  LC3DBody.OverallHeight;
+                        LC3DModName   := LC3DBody.Identifier;
+                        LC3DModel     := LC3DBody.Model;
                         if  LC3DModel <> nil then
                         if  (LC3DModel.ModelType = e3DModelType_Generic) then
                             LC3DModFN := ExtractfileName(LC3DModel.FileName);
@@ -350,11 +351,11 @@ begin
                         ModDesc  := Model.GetModelParameterValueByName(ParaName);
                         if ModDesc = 'Footprint not found'  then
                             ModDesc := '<blank>';
-                        Parameters := Parameters + ParaName + #03 + ModDesc + #03;
+                        Parameters := Parameters + ModDesc + #03;
                     end;
 
                     ModelList.Add(ModelName);
-                    ModelDesc.Add(Parameters + SourceLib + #03 + LC3DModName + #03 + LC3DModFN);  // Model.ModelDescription);
+                    ModelDesc.Add(Parameters + SourceLib + #03 + LC3DModName + #03 + LC3DModFN + #03 + CoordUnitToStringWithAccuracy(LC3DOvlHeight, eMM, 4, 3) );  // Model.ModelDescription);
                 end;
             end;
         end;
@@ -367,7 +368,7 @@ begin
 
         ParseLine.Clear;
         ParseLine.Add(' ' + #03 + ' ' + #03 + ' ' + #03 + ' ');
-        ParaValue := '';
+        Parameters := '';
 
         K := ModelDesc.IndexOfName(ModelName);
         if K >= 0 then
@@ -377,9 +378,10 @@ begin
         begin
             L := 50;
             if K > 0 then L := 13;
-            ParaValue := ParaValue + ' | ' + PadRight(ParseLine.Strings(K), L);
+            ParaValue  := PadRight(ParseLine.Strings(K), L);
+            Parameters := Parameters + ' | '  + ParaValue;
         end;
-        MReport.Add(PadRight(LibId,30) + ' | ' + PadRight(IntToStr(J+1), 3) + ' | ' + PadRight(ModelName, 50) + ParaValue );
+        MReport.Add(PadRight(LibId,30) + ' | ' + PadRight(IntToStr(J+1), 3) + ' | ' + PadRight(ModelName, 50) + Parameters );
     end;
 
     ModelList.Clear;
