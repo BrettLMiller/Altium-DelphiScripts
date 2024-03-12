@@ -6,14 +6,19 @@
  Report all comp body models:
     Iterate all footprints within the current doc.
 
- FixId replaces the blank Extruded model name with the footprint name.
+ ResetOverallHeight()
+    PcbLib only.
+    Iterate over PcbLib FP & refresh CompBody Overall height & Area
+  
+ FixId
+    replaces the blank Extruded model name with the footprint name.
 
 
 27/06/2022  v0.01 POC cut out of other script & rejigged designator pattern reporting.
 03/07/2022  v0.10 refactor PcbLib loop, faster & fix delete extruded models
 2024-03-11  v0.12 report Overall Height
 2024-03-11  v0.13 fix PcbLib origin refresh issue.
-
+2024-03-11  v0.14 add Reset Overall Height & Area
 
 Model Get XYZ is broken
 PcbLib Component origin is a mess. The focused comp has a different origin??
@@ -35,7 +40,8 @@ var
     Board     : IPCB_Board;
     PcbLib    : IPCB_Library;
     IsLib     : boolean;
-    Units     : TUnit;
+    BUnit     : TUnit;
+    NBUnit    : TUnit;
     BOrigin   : TCoordPoint;
 
 function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
@@ -52,6 +58,86 @@ end;
 procedure FixIdAndReportCompBodies;
 begin
     ReportTheBodies(cFix);
+end;
+
+procedure ResetOverallHeight;     // trigger recalc OverallHeight & area
+var
+    Footprint    : IPCB_Component;
+    CompBody     : IPCB_ComponentBody;
+    CompModel    : IPCB_Model;
+    ModType      : T3DModelType;
+    OvlHeight1   : TCoord;
+    OvlHeight2   : TCoord;
+    CBArea1      : integer;
+    CBArea2      : integer;
+    IsLib        : boolean;
+    FoundGeneric : boolean;
+    i, j         : integer;
+
+begin
+    Document := GetWorkSpace.DM_FocusedDocument;
+    if not (Document.DM_DocumentKind = cDocKind_PcbLib) Then
+    begin
+         ShowMessage('No PcbLib focused. ');
+         Exit;
+    end;
+    PcbLib := PCBServer.GetCurrentPCBLibrary;
+    Board := PcbLib.Board;
+    BUnit := Board.DisplayUnit;
+
+    NBUnit := eMetric;
+    if BUnit = eMetric then NBunit :=  eImperial;
+
+    IsLib := true;
+
+    Rpt := TStringList.Create;
+    Rpt.Add(ExtractFileName(Board.FileName));
+    Rpt.Add('');
+    Rpt.Add('Overall Height or Area corrected');
+    Rpt.Add(PadRight('n',3) + '|' + PadRight('Footprint', 20) + '|' + PadRight('Identifier', 20) + '|' + PadRight('ModelType',12)
+            + ' |  Area   |  OverallHeight' ) ;
+    Rpt.Add('');
+
+    for i := 0 to (PcbLib.ComponentCount - 1) do
+    begin
+        Footprint := PcbLib.GetComponent(i);
+        PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
+        Footprint.BeginModify;
+
+        FoundGeneric := false;
+
+        for j := 1 to Footprint.GetPrimitiveCount(MkSet(eComponentBodyObject)) do
+        begin
+            CompBody   := Footprint.GetPrimitiveAt(j, eComponentBodyObject);
+            OvlHeight1 := CompBody.OverallHeight;
+            CBArea1  := CompBody.Area / k1MilSq;     // force double (need Int64)
+
+            CompBody.BeginModify;
+            CompBody.SetState_FromModel;
+            CompBody.ModelHasChanged;
+            CompBody.EndModify;
+            CompBody.GraphicallyInvalidate;
+
+            OvlHeight2 := CompBody.OverallHeight;
+            CBArea2    := CompBody.Area / k1MilSq;
+
+            CompModel := CompBody.Model;
+            ModType := -1;
+            if CompModel <> nil then
+                ModType := CompModel.ModelType;
+
+            if (OvlHeight1 <> OvlHeight2) or (CBArea1 <> CBArea2) then
+                Rpt.Add(IntToStr(i+1) + ':' + IntToStr(j) + ' | ' + PadRight(Footprint.Name, 6)
+                        + ' | ' + PadRight(CompBody.Identifier, 20) + ' | ' + ModelTypeToStr(ModType)
+                        + ' | ' + SqrCoordToUnitString_i(CompBody.Area, NBUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, BUnit, 4, 3) );
+
+        end;
+
+        Footprint.GraphicallyInvalidate;
+        Footprint.EndModify;
+    end; //i
+    SaveReportLog('FPBodyOvlHeightRep.txt', true);
+    Rpt.Free;
 end;
 
 procedure ReportTheBodies(const fix : integer);
@@ -89,9 +175,10 @@ begin
 
     BeginHourGlass(crHourGlass);
 // PcbLib origin is (0,0) if FP is not selected
-    if IsLib then BOrigin := Point(0, 0)
-    else          BOrigin := Point(Board.XOrigin, Board.YOrigin);  // abs Tcoord
-    Units := Board.DisplayUnit;
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);  // abs Tcoord
+    BUnit := Board.DisplayUnit;
+    NBUnit := eMetric;
+    if BUnit = eMetric then NBunit :=  eImperial;
 
     PLayerSet := LayerSetUtils.EmptySet;
     PLayerSet.Include(eTopLayer);
@@ -201,7 +288,7 @@ begin
         CBodyName       := CompBody.Name;                   // ='' for all 3d comp body
         CompModelId     := CompBody.Identifier;
         CBOverallHeight := CompBody.OverallHeight;
-        CompArea        := SqrCoordToUnitString_i(CompBody.Area, Units, 3);
+        CompArea        := SqrCoordToUnitString_i(CompBody.Area, NBUnit, 3);
 
         CompModel := CompBody.Model;
         if CompModel <> nil then
@@ -231,7 +318,7 @@ begin
         CompBody.ShapeSegmentCount;
         CompBody.HoleCount;
         ModName := CBodyName;
-        CompArea  := SqrCoordToUnitString_i(CompBody.Area, Units, 3);
+        CompArea  := SqrCoordToUnitString_i(CompBody.Area, BUnit, 3);
 
 // name the blank models with designator & footprint pattern
         if (Fix = cFix) then
