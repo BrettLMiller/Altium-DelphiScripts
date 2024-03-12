@@ -19,15 +19,13 @@
 2024-03-11  v0.12 report Overall Height
 2024-03-11  v0.13 fix PcbLib origin refresh issue.
 2024-03-11  v0.14 add Reset Overall Height & Area
+2024-03-12  v0.15 adjust mixed up BUnit, refactor reporting-fixing
 
 Model Get XYZ is broken
 PcbLib Component origin is a mess. The focused comp has a different origin??
 
 }
 const
-    cModel3DGeneric   = 'Generic Model';
-    cModel3DExtruded  = 'Extruded';
-
     cReport = 0
     cFix    = 1;
     cStrip  = 2;
@@ -45,10 +43,10 @@ var
     BOrigin   : TCoordPoint;
 
 function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
-procedure SaveReportLog(FileExt : WideString, const display : boolean);                                 forward;
-function ModelTypeToStr (ModType : T3DModelType) : WideString;                                          forward;
-procedure ReportTheBodies(const fix : boolean);                                                         forward;
-function ProcessReportBodies(Footprint : IPCB_Component, Islib : boolean, fix : integer) : TObjectList; forward;
+procedure SaveReportLog(FileExt : WideString, const display : boolean);                       forward;
+function ModelTypeToStr (ModType : T3DModelType) : WideString;                                forward;
+procedure ReportTheBodies(const fix : boolean);                                               forward;
+function ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : boolean; forward;
 
 procedure ReportCompBodies;
 begin
@@ -129,7 +127,7 @@ begin
             if (OvlHeight1 <> OvlHeight2) or (CBArea1 <> CBArea2) then
                 Rpt.Add(IntToStr(i+1) + ':' + IntToStr(j) + ' | ' + PadRight(Footprint.Name, 6)
                         + ' | ' + PadRight(CompBody.Identifier, 20) + ' | ' + ModelTypeToStr(ModType)
-                        + ' | ' + SqrCoordToUnitString_i(CompBody.Area, NBUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, BUnit, 4, 3) );
+                        + ' | ' + SqrCoordToUnitString_i(CompBody.Area, BUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, NBUnit, 4, 3) );
 
         end;
 
@@ -146,6 +144,9 @@ var
     FPIterator   : IPCB_BoardIterator;
     Footprint    : IPCB_Component;
     CompBody     : IPCB_ComponentBody;
+    FPName       : WideString;
+    FPPattern    : WideString;
+
     PLayerSet    : IPCB_LayerSet;
 
     CBList       : TObjectList;
@@ -188,7 +189,8 @@ begin
     Rpt.Add(ExtractFileName(Board.FileName));
     Rpt.Add('');
     Rpt.Add('');
-    Rpt.Add(PadRight('n',2) + '|' + PadRight('Desgr', 6) + '|' + PadRight('Footprint', 20) + '|' + PadRight('Identifier', 20) + '|' + PadRight('ModelName', 24) + ' | ' + PadRight('ModelType',12)
+    Rpt.Add(PadRight('n',2) + '|' + PadRight('Desgr', 6) + '|' + PadRight('Footprint', 20) );
+    Rpt.Add(' idx |' + PadRight('Identifier', 30) + '|' + PadRight('ModelName', 35) + ' | ' + PadRight('ModelType',12)
             + ' | ' + PadLeft('X',10) + ' | ' + PadLeft('Y',10) + ' | Ang    |  Area   |  OverallHeight' );
     Rpt.Add('');
 
@@ -200,7 +202,22 @@ begin
             Footprint := PcbLib.GetComponent(i);
             PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
 
-            CBList := ProcessReportBodies(Footprint, Islib, fix);
+            FPName    := 'FP';
+            FPPattern := Footprint.Name;
+
+            Rpt.Add(PadRight(IntToStr(i),3) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20));
+            if Footprint.ItemGUID <> '' then
+                Rpt.Add('ItemGUID : ' + Footprint.ItemGUID + '  ItemRevGUID : ' + Footprint.ItemRevisionGUID + '  VGUID : ' + Footprint.VaultGUID);
+
+            CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, false);
+            ProcessReportBodies(CBList, cReport, '');
+
+//  fix extruded model names
+//  rename the blank model names with footprint pattern
+            CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
+            ProcessReportBodies(CBList, fix, FPPattern);
+
+            Rpt.Add('');
             CBList.Clear;
         end;
 
@@ -215,7 +232,17 @@ begin
         Footprint := FPIterator.FirstPCBObject;
         while Footprint <> Nil Do
         begin
-            CBList := ProcessReportBodies(Footprint, Islib, fix);
+            FPName    := Footprint.Name.Text;
+            FPPattern := Footprint.Pattern;
+
+            CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, false);
+            ProcessReportBodies(CBList, cReport, '');
+
+            CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
+
+//  fix extruded model names
+//  rename the blank model names with designator & footprint pattern
+            ProcessReportBodies(CBList, fix, FPName + '_' + FPPattern);
 
             Footprint := FPIterator.NextPCBObject;
 
@@ -233,14 +260,11 @@ begin
     Rpt.Free;
 end;
 
-// returns the non-generic bodies
-function ProcessReportBodies(Footprint : IPCB_Component, Islib : boolean, fix : integer) : TObjectList;
+function ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : boolean;
 var
     CompBody     : IPCB_ComponentBody;
     CompModel    : IPCB_Model;
     ModType      : T3DModelType;
-    FPName       : WideString;
-    FPPattern    : WideString;
     CBodyName    : WideString;
     CompModelId  : WideString;
     CompArea     : WideString;
@@ -250,37 +274,21 @@ var
     ModRot       : TAngle;
     NoOfPrims    : Integer;
     FoundGeneric : boolean;
-    CBList       : TObjectList;
     i            : integer;
 
 begin
-    Result := TObjectList.Create;
-    Result.OwnsObjects := false;
-
-    if IsLib then
-    begin
-        FPName    := 'FP';
-        FPPattern := Footprint.Name;
-//        CurrentLib.SetState_CurrentComponent (Footprint)      // to make origin correct.
-    end else
-    begin
-//        FPDes     := Footprint.SourceDesignator;
-        FPName    := Footprint.Name.Text;
-        FPPattern := Footprint.Pattern;
-    end;
-
-    if Footprint.ItemGUID <> '' then
-        Rpt.Add('ItemGUID : ' + Footprint.ItemGUID + '  ItemRevGUID : ' + Footprint.ItemRevisionGUID + '  VGUID : ' + Footprint.VaultGUID);
+    Result := false;
 
     NoOfPrims := 0;
     FoundGeneric := false;
 
-    CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, false);
-    if CBList.Count > 0 then FoundGeneric := true;
-    
     for i := 0 to (CBList.Count - 1) do
     begin
-        CompBody := CBList.Items(i);
+        CompBody  := CBList.Items(i);
+        CompModel := CompBody.Model;
+        if CompModel = nil then continue;
+
+        ModType   := CompModel.ModelType;
 
         CompBody.ShapeSegmentCount;
         CompBody.HoleCount;
@@ -288,68 +296,46 @@ begin
         CBodyName       := CompBody.Name;                   // ='' for all 3d comp body
         CompModelId     := CompBody.Identifier;
         CBOverallHeight := CompBody.OverallHeight;
-        CompArea        := SqrCoordToUnitString_i(CompBody.Area, NBUnit, 3);
+        CompArea        := SqrCoordToUnitString_i(CompBody.Area, BUnit, 3);
 
-        CompModel := CompBody.Model;
-        if CompModel <> nil then
-        begin
-                Inc(NoOfPrims);
-                ModName := CompModel.FileName;
-                ModType := CompModel.ModelType;
-                MOrigin := CompModel.Origin;
-                ModRot  := CompModel.Rotation;
+        ModName := CompModel.FileName;
+        ModType := CompModel.ModelType;
+        MOrigin := CompModel.Origin;
+        ModRot  := CompModel.Rotation;
 
-                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
-                        + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea
-                        + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, eMM, 4, 3) );
-
-        end;
-    end;
-
-// generics
-    CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
-
-    for i := 0 to (CBList.Count - 1) do
-    begin
-        CompBody        := CBList.Items(i);
-        CBodyName       := CompBody.Name;                      // ='' for all 3d comp body
-        CompModelId     := CompBody.Identifier;
-        CBOverallHeight := CompBody.OverallHeight;
-        CompBody.ShapeSegmentCount;
-        CompBody.HoleCount;
-        ModName := CBodyName;
-        CompArea  := SqrCoordToUnitString_i(CompBody.Area, BUnit, 3);
-
-// name the blank models with designator & footprint pattern
-        if (Fix = cFix) then
-        if (CompModelId = '') then
-            CompBody.SetState_Identifier(FPName + '_' + FPPattern);
-
-        CompModelId := CompBody.Identifier;
-
-        CompModel := CompBody.Model;
-        if CompModel <> nil then
+        if ModType = e3DModelType_Generic then
         begin
             Inc(NoOfPrims);
-            ModType     := CompModel.ModelType;
-            MOrigin     := CompModel.Origin;
-            ModRot      := CompModel.Rotation;
+            FoundGeneric    := true;
 
-            Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+            Rpt.Add('   ' + PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(CompModelId, 30) + '|' + PadRight(ModName, 35) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
                     + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea
-                    + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, eMM, 4, 3) );
+                    + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, NBUnit, 4, 3) );
+
+//  vault stuff
+//            if CompModel.ItemGUID <> '' then
+//            Rpt.Add('ItemGUID : ' + CompModel.ItemGUID + '  ItemRevGUID : ' + CompModel.ItemRevisionGUID + '  VGUID : ' + CompModel.VaultGUID);
+
+        end;
+// generics
+        if ModType <> e3DModelType_Generic then
+        begin
+            ModName := CBodyName;
+
+// name the blank model names with designator & footprint pattern
+            if (Fix = cFix) then
+            if (CompModelId = '') then
+                CompBody.SetState_Identifier(NewName);
+            CompModelId := CompBody.Identifier;
+            Inc(NoOfPrims);
+
+            Rpt.Add('   ' + PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(CompModelId, 30) + '|' + PadRight(ModName, 35) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+                    + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea
+                    + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, NBUnit, 4, 3) );
         end;
     end;
-
-//  return non-generics if any generic was found
-    if FoundGeneric then
-    for i := 0 to (CBList.Count - 1) do
-    begin
-        CompBody := CBList.Items(i);
-        Result.Add(CompBody);
-    end;
-    CBList.Clear;
 end;
+
 {---------------------------------------------------------------------------------------------------------------------------}
 function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList;
 var
