@@ -4,12 +4,11 @@
  from CompModelHeights.pas & LoadModels.pas
 
  Report all comp body models:
-    Iterate all footprints within the current doc.
+    Iterate all footprint & free models within the current doc.
 
  ResetOverallHeight()
-    PcbLib only.
-    Iterate over PcbLib FP & refresh CompBody Overall height & Area
-  
+    Iterate over all FP & free models & refresh CompBody Overall height & Area
+
  FixId
     replaces the blank Extruded model name with the footprint name.
 
@@ -20,11 +19,12 @@
 2024-03-11  v0.13 fix PcbLib origin refresh issue.
 2024-03-11  v0.14 add Reset Overall Height & Area
 2024-03-12  v0.15 adjust mixed up BUnit, refactor reporting-fixing
+2024-03-13  v0.16 support PcbDoc ResetOverallHeight() & free models
 
-Model Get XYZ is broken
-PcbLib Component origin is a mess. The focused comp has a different origin??
-
+Model Get XYZ is broken, could use OverallHeight & Standoff to calculate z
+PcbLib Component origin is a mess. The focused comp has a different origin.
 }
+
 const
     cReport = 0
     cFix    = 1;
@@ -42,11 +42,13 @@ var
     NBUnit    : TUnit;
     BOrigin   : TCoordPoint;
 
-function GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
-procedure SaveReportLog(FileExt : WideString, const display : boolean);                       forward;
-function ModelTypeToStr (ModType : T3DModelType) : WideString;                                forward;
-procedure ReportTheBodies(const fix : boolean);                                               forward;
-function ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : boolean; forward;
+function  GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
+procedure SaveReportLog(FileExt : WideString, const display : boolean);                                          forward;
+function  ModelTypeToStr(ModType : T3DModelType) : WideString;                                                   forward;
+procedure ReportTheBodies(const fix : boolean);                                                                  forward;
+function  ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : integer; forward;
+procedure ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean);        forward;
+function  ProcessCompBody(CompBody : IPCB_ComponentBody) : WideString; forward;
 
 procedure ReportCompBodies;
 begin
@@ -61,81 +63,174 @@ end;
 procedure ResetOverallHeight;     // trigger recalc OverallHeight & area
 var
     Footprint    : IPCB_Component;
+    FPIterator   : IPCB_BoardIterator;
     CompBody     : IPCB_ComponentBody;
+    PLayerSet    : IPCB_LayerSet;
+    CBList       : TObjectList;
+    IsLib        : boolean;
+    RptLine      : WideString;
+    i            : integer;
+
+begin
+    Document := GetWorkSpace.DM_FocusedDocument;
+    if not ((Document.DM_DocumentKind = cDocKind_PcbLib) or (Document.DM_DocumentKind = cDocKind_Pcb)) Then
+    begin
+         ShowMessage('No PcbDoc or PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Document.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        PcbLib := PCBServer.GetCurrentPCBLibrary;
+        Board := PcbLib.Board;
+        IsLib := true;
+    end else
+        Board  := PCBServer.GetCurrentPCBBoard;
+
+    if (Board = nil) and (PcbLib = nil) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
+    BUnit  := Board.DisplayUnit;
+    NBUnit := eMetric;
+    if BUnit = eMetric then NBunit :=  eImperial;
+
+    PLayerSet := LayerSetUtils.EmptySet;
+    PLayerSet.Include(eTopLayer);
+    PLayerSet.Include(eBottomLayer);
+
+    Rpt := TStringList.Create;
+    Rpt.Add(ExtractFileName(Board.FileName));
+    Rpt.Add('');
+    Rpt.Add('Overall Height or Area corrected');
+    Rpt.Add(PadRight('n:m',3) + '|  Des   | ' + PadRight('Footprint', 20) + '|' + PadRight('Identifier', 20) + '|' + PadRight('ModelType',12)
+            + ' |  Area   |  OverallHeight' ) ;
+    Rpt.Add('');
+
+    if IsLib then
+    begin
+        for i := 0 to (PcbLib.ComponentCount - 1) do
+        begin
+            Footprint := PcbLib.GetComponent(i);
+            PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
+
+            ProcessFootprintBodies(Footprint, i, true);
+            Rpt.Add('');
+        end; //i
+// PcbDoc
+    end else
+    begin
+        FPIterator := Board.BoardIterator_Create;
+        FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+        FPIterator.AddFilter_IPCB_LayerSet(PLayerSet);
+        FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
+        i := 0;
+        Footprint := FPIterator.FirstPCBObject;
+        while Footprint <> Nil Do
+        begin
+            ProcessFootprintBodies(Footprint, i, false);
+
+            Rpt.Add('');
+            inc(i);
+            Footprint := FPIterator.NextPCBObject;
+        end;
+
+// free bodies
+        Rpt.Add('Board Free Bodies/Models');
+        FPIterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
+        FPIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.MechanicalLayers);
+        FPIterator.AddFilter_Method(eProcessFree);
+        CompBody := FPIterator.FirstPCBObject;
+        while CompBody <> Nil Do
+        begin
+            if CompBody.IsFreePrimitive then
+            begin
+                Rpt.Add(IntToStr(i+1) + '       |' + PadRight('free', 6) + '|' + PadRight(CompBody.Identifier, 20) );
+                RptLine := ProcessCompBody(CompBody);
+
+                if RptLine <> '' then
+                    Rpt.Add(IntToStr(i+1) + ':' + IntToStr(1) + ' | ' + RptLine);
+
+                inc(i);
+            end;
+            CompBody := FPIterator.NextPCBObject;
+        end;
+
+        Board.BoardIterator_Destroy(FPIterator);
+        Board.GraphicalView_ZoomRedraw;
+    end;
+
+    SaveReportLog('FPBodyOvlHeightRep.txt', true);
+    Rpt.Free;
+end;
+
+function ProcessCompBody(CompBody : IPCB_ComponentBody) : WideString;
+var
     CompModel    : IPCB_Model;
     ModType      : T3DModelType;
     OvlHeight1   : TCoord;
     OvlHeight2   : TCoord;
     CBArea1      : integer;
     CBArea2      : integer;
-    IsLib        : boolean;
-    FoundGeneric : boolean;
-    i, j         : integer;
 
 begin
-    Document := GetWorkSpace.DM_FocusedDocument;
-    if not (Document.DM_DocumentKind = cDocKind_PcbLib) Then
+    Result := '';
+    OvlHeight1 := CompBody.OverallHeight;
+    CBArea1    := CompBody.Area / k1MilSq;     // force double (need Int64)
+
+    CompBody.BeginModify;
+    CompBody.SetState_FromModel;
+    CompBody.ModelHasChanged;
+    CompBody.EndModify;
+    CompBody.GraphicallyInvalidate;
+
+    OvlHeight2 := CompBody.OverallHeight;
+    CBArea2    := CompBody.Area / k1MilSq;
+
+    CompModel := CompBody.Model;
+    ModType   := -1;
+    if CompModel <> nil then
+        ModType := CompModel.ModelType;
+
+    if (OvlHeight1 <> OvlHeight2) or (CBArea1 <> CBArea2) then
+        Result := PadRight(CompBody.Identifier, 20) + ' | ' + ModelTypeToStr(ModType)
+                  + ' | ' + SqrCoordToUnitString_i(CompBody.Area, BUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, NBUnit, 4, 3)
+                  + '  diff ' + CoordUnitToStringWithAccuracy(OvlHeight2-OvlHeight1, NBUnit, 4, 3);
+end;
+
+procedure ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean);
+var
+    CompBody     : IPCB_ComponentBody;
+    FPName       : WideString;
+    FPPattern    : WideString;
+    RptLine      : WideString;
+    i            : integer;
+
+begin
+    if IsLib then
     begin
-         ShowMessage('No PcbLib focused. ');
-         Exit;
+        FPName    := 'FP';
+        FPPattern := Footprint.Name;
+    end else
+    begin
+        FPName    := Footprint.Name.Text;
+        FPPattern := Footprint.Pattern;
     end;
-    PcbLib := PCBServer.GetCurrentPCBLibrary;
-    Board := PcbLib.Board;
-    BUnit := Board.DisplayUnit;
 
-    NBUnit := eMetric;
-    if BUnit = eMetric then NBunit :=  eImperial;
+    Rpt.Add(IntToStr(Idx+1) + '       |' + PadRight(FPName, 6) + '|' + PadRight(FPPattern, 20) );
+    Footprint.BeginModify;
 
-    IsLib := true;
-
-    Rpt := TStringList.Create;
-    Rpt.Add(ExtractFileName(Board.FileName));
-    Rpt.Add('');
-    Rpt.Add('Overall Height or Area corrected');
-    Rpt.Add(PadRight('n',3) + '|' + PadRight('Footprint', 20) + '|' + PadRight('Identifier', 20) + '|' + PadRight('ModelType',12)
-            + ' |  Area   |  OverallHeight' ) ;
-    Rpt.Add('');
-
-    for i := 0 to (PcbLib.ComponentCount - 1) do
+    for i := 1 to Footprint.GetPrimitiveCount(MkSet(eComponentBodyObject)) do
     begin
-        Footprint := PcbLib.GetComponent(i);
-        PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
-        Footprint.BeginModify;
+        CompBody := Footprint.GetPrimitiveAt(i, eComponentBodyObject);
+        RptLine  := ProcessCompBody(CompBody);
 
-        FoundGeneric := false;
-
-        for j := 1 to Footprint.GetPrimitiveCount(MkSet(eComponentBodyObject)) do
-        begin
-            CompBody   := Footprint.GetPrimitiveAt(j, eComponentBodyObject);
-            OvlHeight1 := CompBody.OverallHeight;
-            CBArea1  := CompBody.Area / k1MilSq;     // force double (need Int64)
-
-            CompBody.BeginModify;
-            CompBody.SetState_FromModel;
-            CompBody.ModelHasChanged;
-            CompBody.EndModify;
-            CompBody.GraphicallyInvalidate;
-
-            OvlHeight2 := CompBody.OverallHeight;
-            CBArea2    := CompBody.Area / k1MilSq;
-
-            CompModel := CompBody.Model;
-            ModType := -1;
-            if CompModel <> nil then
-                ModType := CompModel.ModelType;
-
-            if (OvlHeight1 <> OvlHeight2) or (CBArea1 <> CBArea2) then
-                Rpt.Add(IntToStr(i+1) + ':' + IntToStr(j) + ' | ' + PadRight(Footprint.Name, 6)
-                        + ' | ' + PadRight(CompBody.Identifier, 20) + ' | ' + ModelTypeToStr(ModType)
-                        + ' | ' + SqrCoordToUnitString_i(CompBody.Area, BUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, NBUnit, 4, 3) );
-
-        end;
-
-        Footprint.GraphicallyInvalidate;
-        Footprint.EndModify;
-    end; //i
-    SaveReportLog('FPBodyOvlHeightRep.txt', true);
-    Rpt.Free;
+        if RptLine <> '' then
+            Rpt.Add(IntToStr(Idx+1) + ':' + IntToStr(i) + ' | ' + RptLine);
+    end;
+    Footprint.EndModify;
+    Footprint.GraphicallyInvalidate;
 end;
 
 procedure ReportTheBodies(const fix : integer);
@@ -146,10 +241,9 @@ var
     CompBody     : IPCB_ComponentBody;
     FPName       : WideString;
     FPPattern    : WideString;
-
     PLayerSet    : IPCB_LayerSet;
-
     CBList       : TObjectList;
+    RptLine      : WideString;
     i, j         : integer;
 
 begin
@@ -190,7 +284,7 @@ begin
     Rpt.Add('');
     Rpt.Add('');
     Rpt.Add(PadRight('n',2) + '|' + PadRight('Desgr', 6) + '|' + PadRight('Footprint', 20) );
-    Rpt.Add(' idx |' + PadRight('Identifier', 30) + '|' + PadRight('ModelName', 35) + ' | ' + PadRight('ModelType',12)
+    Rpt.Add(' idx |' + PadRight('Identifier', 20) + '|' + PadRight('ModelName', 24) + ' | ' + PadRight('ModelType',12)
             + ' | ' + PadLeft('X',10) + ' | ' + PadLeft('Y',10) + ' | Ang    |  Area   |  OverallHeight' );
     Rpt.Add('');
 
@@ -215,7 +309,7 @@ begin
 //  fix extruded model names
 //  rename the blank model names with footprint pattern
             CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
-            ProcessReportBodies(CBList, fix, FPPattern);
+            ProcessReportBodies(CBList, fix, FPPattern);               // fix extruded model names
 
             Rpt.Add('');
             CBList.Clear;
@@ -227,8 +321,8 @@ begin
         FPIterator := Board.BoardIterator_Create;
         FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
         FPIterator.AddFilter_IPCB_LayerSet(PLayerSet);
-        FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
-
+        FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponent }
+        i := 0;
         Footprint := FPIterator.FirstPCBObject;
         while Footprint <> Nil Do
         begin
@@ -239,15 +333,31 @@ begin
             ProcessReportBodies(CBList, cReport, '');
 
             CBList := GetCompBodies(Footprint, '*', e3DModelType_Generic, true);
-
-//  fix extruded model names
-//  rename the blank model names with designator & footprint pattern
-            ProcessReportBodies(CBList, fix, FPName + '_' + FPPattern);
+            ProcessReportBodies(CBList, fix, FPName + '_' + FPPattern);               // fix extruded model names
 
             Footprint := FPIterator.NextPCBObject;
 
             Rpt.Add('');
             CBList.Clear;
+            inc(i);
+        end;
+
+// free bodies
+        Rpt.Add('Board Free Bodies/Models');
+        FPIterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
+        FPIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.MechanicalLayers);
+        FPIterator.AddFilter_Method(eProcessFree);
+        CompBody := FPIterator.FirstPCBObject;
+        while CompBody <> Nil Do
+        begin
+            if CompBody.IsFreePrimitive then
+            begin
+                CBList.Add(CompBody);
+                ProcessReportBodies(CBList, fix, FPName + '_' + FPPattern);
+                CBList.Clear;
+                inc(i);
+            end;
+            CompBody := FPIterator.NextPCBObject;
         end;
 
         Board.BoardIterator_Destroy(FPIterator);
@@ -260,7 +370,7 @@ begin
     Rpt.Free;
 end;
 
-function ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : boolean;
+function ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : integer;
 var
     CompBody     : IPCB_ComponentBody;
     CompModel    : IPCB_Model;
@@ -272,14 +382,11 @@ var
     ModName      : WideString;
     MOrigin      : TCoordPoint;
     ModRot       : TAngle;
-    NoOfPrims    : Integer;
     FoundGeneric : boolean;
     i            : integer;
 
 begin
-    Result := false;
-
-    NoOfPrims := 0;
+    Result := 0;
     FoundGeneric := false;
 
     for i := 0 to (CBList.Count - 1) do
@@ -289,9 +396,6 @@ begin
         if CompModel = nil then continue;
 
         ModType   := CompModel.ModelType;
-
-        CompBody.ShapeSegmentCount;
-        CompBody.HoleCount;
 
         CBodyName       := CompBody.Name;                   // ='' for all 3d comp body
         CompModelId     := CompBody.Identifier;
@@ -305,10 +409,10 @@ begin
 
         if ModType = e3DModelType_Generic then
         begin
-            Inc(NoOfPrims);
+            Inc(Result);
             FoundGeneric    := true;
 
-            Rpt.Add('   ' + PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(CompModelId, 30) + '|' + PadRight(ModName, 35) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+            Rpt.Add('   ' + PadRight(IntToStr(Result),2) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
                     + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea
                     + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, NBUnit, 4, 3) );
 
@@ -322,14 +426,15 @@ begin
         begin
             ModName := CBodyName;
 
-// name the blank model names with designator & footprint pattern
+// name the blank models with designator & footprint pattern
             if (Fix = cFix) then
             if (CompModelId = '') then
                 CompBody.SetState_Identifier(NewName);
             CompModelId := CompBody.Identifier;
-            Inc(NoOfPrims);
 
-            Rpt.Add('   ' + PadRight(IntToStr(NoOfPrims),2) + '|' + PadRight(CompModelId, 30) + '|' + PadRight(ModName, 35) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+            Inc(Result);
+
+            Rpt.Add('   ' + PadRight(IntToStr(Result),2) + '|' + PadRight(CompModelId, 20) + '|' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
                     + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot)  + ' | ' + CompArea
                     + ' | ' + CoordUnitToStringWithAccuracy(CBOverallHeight, NBUnit, 4, 3) );
         end;
