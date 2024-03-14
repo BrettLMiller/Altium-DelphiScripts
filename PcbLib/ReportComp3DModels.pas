@@ -20,6 +20,7 @@
 2024-03-11  v0.14 add Reset Overall Height & Area
 2024-03-12  v0.15 adjust mixed up BUnit, refactor reporting-fixing
 2024-03-13  v0.16 support PcbDoc ResetOverallHeight() & free models
+2024-03-14  v0.17 report any area change
 
 Model Get XYZ is broken, could use OverallHeight & Standoff to calculate z
 PcbLib Component origin is a mess. The focused comp has a different origin.
@@ -29,6 +30,7 @@ const
     cReport = 0
     cFix    = 1;
     cStrip  = 2;
+    cIgnoreSize = 1;  // sq Coord area
 
 var
     Project   : IProject;
@@ -173,11 +175,12 @@ var
     OvlHeight2   : TCoord;
     CBArea1      : integer;
     CBArea2      : integer;
+    Sign         : WideString;
 
 begin
     Result := '';
     OvlHeight1 := CompBody.OverallHeight;
-    CBArea1    := CompBody.Area / k1MilSq;     // force double (need Int64)
+    CBArea1    := CompBody.Area / k1MilSq;         // force float/extended (need Int64)
 
     CompBody.BeginModify;
     CompBody.SetState_FromModel;
@@ -187,15 +190,22 @@ begin
 
     OvlHeight2 := CompBody.OverallHeight;
     CBArea2    := CompBody.Area / k1MilSq;
+    CBArea1    := (CBArea2 - CBArea1) * k1MilSq;    // diff sq Coord Real
+    CBArea2 := CBArea2 * k1MilSq;
+    Sign := '+';
+    if CBArea1 < 0 then Sign := '-';
+    if CBArea1 = 0 then Sign := ' ';
+    CBArea1 := abs(CBArea1);
 
     CompModel := CompBody.Model;
     ModType   := -1;
     if CompModel <> nil then
         ModType := CompModel.ModelType;
 
-    if (OvlHeight1 <> OvlHeight2) or (CBArea1 <> CBArea2) then
+    if (OvlHeight1 <> OvlHeight2) or (CBArea1 > cIgnoreSize) then
         Result := PadRight(CompBody.Identifier, 20) + ' | ' + ModelTypeToStr(ModType)
-                  + ' | ' + SqrCoordToUnitString_i(CompBody.Area, BUnit, 3) + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, NBUnit, 4, 3)
+                  + ' | ' + SqrCoordToUnitString(CBArea2, BUnit, 3) + ' diff ' + Sign + SqrCoordToUnitString(CBArea1, BUnit, 4)
+                  + ' | ' + CoordUnitToStringWithAccuracy(OvlHeight2, NBUnit, 4, 3)
                   + '  diff ' + CoordUnitToStringWithAccuracy(OvlHeight2-OvlHeight1, NBUnit, 4, 3);
 end;
 
