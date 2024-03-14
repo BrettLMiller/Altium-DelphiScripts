@@ -20,7 +20,7 @@
 2024-03-11  v0.14 add Reset Overall Height & Area
 2024-03-12  v0.15 adjust mixed up BUnit, refactor reporting-fixing
 2024-03-13  v0.16 support PcbDoc ResetOverallHeight() & free models
-2024-03-14  v0.17 report any area change
+2024-03-14  v0.17 report any area change, add change total at top report.
 
 Model Get XYZ is broken, could use OverallHeight & Standoff to calculate z
 PcbLib Component origin is a mess. The focused comp has a different origin.
@@ -45,11 +45,11 @@ var
     BOrigin   : TCoordPoint;
 
 function  GetCompBodies(Footprint : IPCB_Component, const BodyID : WideString , const ModType : T3DModelType, const Exclude : boolean) : TObjectList; forward;
-procedure SaveReportLog(FileExt : WideString, const display : boolean);                                          forward;
-function  ModelTypeToStr(ModType : T3DModelType) : WideString;                                                   forward;
-procedure ReportTheBodies(const fix : boolean);                                                                  forward;
-function  ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : integer; forward;
-procedure ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean);        forward;
+procedure SaveReportLog(FileExt : WideString, const display : boolean);                                             forward;
+function  ModelTypeToStr(ModType : T3DModelType) : WideString;                                                      forward;
+procedure ReportTheBodies(const fix : boolean);                                                                     forward;
+function  ProcessReportBodies(CBList : TObjectList, const fix : integer, const NewName : WideString;) : integer;    forward;
+function  ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean) : integer; forward;
 function  ProcessCompBody(CompBody : IPCB_ComponentBody) : WideString; forward;
 
 procedure ReportCompBodies;
@@ -71,6 +71,8 @@ var
     CBList       : TObjectList;
     IsLib        : boolean;
     RptLine      : WideString;
+    FPCount      : integer;
+    FPTotCount   : integer;
     i            : integer;
 
 begin
@@ -103,13 +105,13 @@ begin
     PLayerSet.Include(eBottomLayer);
 
     Rpt := TStringList.Create;
-    Rpt.Add(ExtractFileName(Board.FileName));
+    Rpt.Add('FileName: ' + ExtractFileName(Board.FileName));
     Rpt.Add('');
-    Rpt.Add('Overall Height or Area corrected');
+    Rpt.Add('3D Model Overall Height &/or Area corrected');
     Rpt.Add(PadRight('n:m',3) + '|  Des   | ' + PadRight('Footprint', 20) + '|' + PadRight('Identifier', 20) + '|' + PadRight('ModelType',12)
             + ' |  Area   |  OverallHeight' ) ;
     Rpt.Add('');
-
+    FPTotCount := 0;
     if IsLib then
     begin
         for i := 0 to (PcbLib.ComponentCount - 1) do
@@ -117,7 +119,8 @@ begin
             Footprint := PcbLib.GetComponent(i);
             PcbLib.SetState_CurrentComponent(Footprint);   // correct origin
 
-            ProcessFootprintBodies(Footprint, i, true);
+            FPCount := ProcessFootprintBodies(Footprint, i, true);
+            FPTotCount := FPTotCount + FPCount;
             Rpt.Add('');
         end; //i
 // PcbDoc
@@ -131,7 +134,8 @@ begin
         Footprint := FPIterator.FirstPCBObject;
         while Footprint <> Nil Do
         begin
-            ProcessFootprintBodies(Footprint, i, false);
+            FPCount := ProcessFootprintBodies(Footprint, i, false);
+            FPTotCount := FPTotCount + FPCount;
 
             Rpt.Add('');
             inc(i);
@@ -152,8 +156,10 @@ begin
                 RptLine := ProcessCompBody(CompBody);
 
                 if RptLine <> '' then
+                begin
                     Rpt.Add(IntToStr(i+1) + ':' + IntToStr(1) + ' | ' + RptLine);
-
+                    inc(FPTotCount);
+                end;
                 inc(i);
             end;
             CompBody := FPIterator.NextPCBObject;
@@ -163,6 +169,7 @@ begin
         Board.GraphicalView_ZoomRedraw;
     end;
 
+    Rpt.Insert(1, 'Total Footprints corrected ' + IntToStr(FPTotCount));
     SaveReportLog('FPBodyOvlHeightRep.txt', true);
     Rpt.Free;
 end;
@@ -209,7 +216,7 @@ begin
                   + '  diff ' + CoordUnitToStringWithAccuracy(OvlHeight2-OvlHeight1, NBUnit, 4, 3);
 end;
 
-procedure ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean);
+function ProcessFootprintBodies(Footprint : IPCB_Component, const Idx : integer; const IsLib : boolean) : integer;
 var
     CompBody     : IPCB_ComponentBody;
     FPName       : WideString;
@@ -218,6 +225,7 @@ var
     i            : integer;
 
 begin
+    Result := 0;
     if IsLib then
     begin
         FPName    := 'FP';
@@ -237,7 +245,10 @@ begin
         RptLine  := ProcessCompBody(CompBody);
 
         if RptLine <> '' then
+        begin
             Rpt.Add(IntToStr(Idx+1) + ':' + IntToStr(i) + ' | ' + RptLine);
+            inc(Result);
+        end;
     end;
     Footprint.EndModify;
     Footprint.GraphicallyInvalidate;
