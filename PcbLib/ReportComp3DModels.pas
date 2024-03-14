@@ -169,8 +169,8 @@ begin
         Board.GraphicalView_ZoomRedraw;
     end;
 
-    Rpt.Insert(1, 'Total Footprints corrected ' + IntToStr(FPTotCount));
-    SaveReportLog('FPBodyOvlHeightRep.txt', true);
+    Rpt.Insert(1, 'Total Footprint Models corrected ' + IntToStr(FPTotCount));
+    SaveReportLog('_FPBodyOvlHeightRep.txt', true);
     Rpt.Free;
 end;
 
@@ -387,7 +387,7 @@ begin
 
     EndHourGlass;
 
-    SaveReportLog('FPBodyReport.txt', true);
+    SaveReportLog('_FPBodyReport.txt', true);
     Rpt.Free;
 end;
 
