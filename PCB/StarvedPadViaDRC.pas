@@ -39,6 +39,7 @@ Author: BL Miller
                  Plane shape test uses hole shape NOT expanded by relief
 2024-03-17  0.15 Plane shape test uses relief expanded pad shape
                  Makes union shape with PV hole as Plane DirectConnectStyle has NO pad!
+2024-03-18  0.16 Refactor hole & pad shape contouring expansions.
 
 TBD:
 1.  use Minimum setting in MinimumAnnularRing rule to store starvation limit as percentage
@@ -511,12 +512,37 @@ var
     GMPC3         : IPCB_GeometricPolygon;
     Area1, Area2  : extended;
     Area3, Area4  : extended;
+    RegionHole    : IPCB_Region;         // hole shape or shape union hole & pad
+    TempLayer     : TLayer;
 begin
-//  PV shape on layer
-    GMPC1 := PCBServer.PCBContourMaker.MakeContour(PVPrim, Expand, Layer);
-// safety hole as direct connect plane has zero pad!
-    GMPC2 := HoleToGMPC(PVPrim);
-    PCBServer.PCBContourUtilities.ClipSetSet(eSetOperation_Union, GMPC2, GMPC1, GMPC1);
+    TempLayer := LayerUtils.MechanicalLayer(1);
+    RegionHole := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+    RegionHole.Layer := TempLayer;
+// safety hole as direct connect plane has zero pad & relief has unknown/unreliable!
+// & poly layer pad could be removed.
+    GMPC3 := HoleToGMPC(PVPrim);
+
+    if Expand = 0 then
+    begin
+//  PV shape on signallayer or Plane DirectConnect
+        GMPC1 := PCBServer.PCBContourMaker.MakeContour(PVPrim, 0, Layer);
+// safety hole as signal layer PV could have pad removed.!
+// combine into union GMPC1
+        PCBServer.PCBContourUtilities.ClipSetSet(eSetOperation_Union, GMPC3, GMPC1, GMPC1);
+        RegionHole.GeometricPolygon := GMPC1;
+    end else
+    begin
+//  PV shape as hole on planelayer
+        RegionHole.GeometricPolygon := GMPC3;
+//          NewRegion.SetOutlineContour( GMPC.Contour(0) )
+// expand the hole by relief expansion.
+        GMPC1 := PCBServer.PCBContourMaker.MakeContour(RegionHole, Expand, TempLayer);
+    end;
+
+//  expand union PV-Hole GMPC1
+    GMPC2 := PCBServer.PCBContourMaker.MakeContour(RegionHole, Expand + MilsToCoord(cExpansion), TempLayer);
+    PCBServer.DestroyPCBObject(RegionHole);
+
     Area1 := GMPC1.Area;
     if (false) and (Area1 > 0) then
     begin
@@ -527,8 +553,7 @@ begin
         Perimeter := PerimeterLength(GMPC1, true)
     else
         Perimeter := 0;
-//  expanded PV
-    GMPC2 := PCBServer.PCBContourMaker.MakeContour(PVPrim, Expand + MilsToCoord(cExpansion), Layer);
+
     Area2 := GMPC2.Area;
     Area2 := Area2 - Area1;
 
