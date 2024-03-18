@@ -10,12 +10,14 @@
 Planes:
 Pad & Via annular rings (pads) are (effectively) removed from padstack &
 replaced by relief construct region part of the polygon pour.
+Relief shapes (inc the annular "pad") are eroded by adjacent objects.
 Contouring pad shape on layer only returns the barrel hole for ReliefConnect but returns nothing for directconnect.
 Need to use to use PlaneConnectStyle & Relief Expansion etc to determine the correct test shape.
 Relief expand the existing (hole) shape to allow non-round hole support in Vias.
 
 Polygons:
 Pad stack is not modifed.
+Pad shape is not eroded by other objects (except hole/boardcutout)
 Test shape is the pad shape.
 
 Poly&Plane:
@@ -40,11 +42,17 @@ Author: BL Miller
 2024-03-17  0.15 Plane shape test uses relief expanded pad shape
                  Makes union shape with PV hole as Plane DirectConnectStyle has NO pad!
 2024-03-18  0.16 Refactor hole & pad shape contouring expansions.
+2024-03-18  0.17 poly signallayer copper calc uses CopperArea/Perimeter factor 100% = full spokes or solid copper
 
 TBD:
 1.  use Minimum setting in MinimumAnnularRing rule to store starvation limit as percentage
     (1000mil or 100mm == 100%) so user can change from default value in Rule
 2.  HoleToGeoPoly() support slots & non-round holes.
+
+IPCB_primitive.IsPreRoute  - ignore unrouted - leave for other rules but they can't be trusted!
+Ignore prims outside BOL
+Ignore stitching vias?
+Speed up? Create Temp region once & reuse? Create Hole GeoPoly once for each pad/via.
 
 info:
 IPCB_Board.PrimPrimDistance in SplitPlanes works for Vias, FAILS for Pads, could be due to plane pad removal.
@@ -61,17 +69,19 @@ IPCB_PowerPlaneConnectStyleRule.PowerPlaneConnectStyle is just IPCB_Primitive pr
 
 {..............................................................................}
 const
-    SpecialRuleKind1 = eRule_MinimumAnnularRing;
-    SpecialRuleName1 = '__Script-DRC-Starved_PVs_';
-    cAllRules        = -1;
-    cReport          = true;
-    cArcResolution   = 0.001;   // mils: impacts number of edges etc..
-    cExpansion       = 2;       // mils: width of test annular ring around pad-via
+    cMaxViolationPrims = 100;
+    SpecialRuleKind1   = eRule_MinimumAnnularRing;
+    SpecialRuleName1   = '__Script-DRC-Starved_PVs_';
+    cAllRules          = -1;
+    cReport            = true;
+    cArcResolution     = 0.01;    // mils: impacts number of edges etc..
+    cExpansion         = 2;       // mils: width of test annular ring around pad-via
 // internal plane
     cPadCopperMinPC  = 99;      // minimum percent of nominal plane/poly connection copper.
     cViaCopperMinPC  = 99;
 // Polygons
-    cPolyCopperMinPC = 50;      // minimim percentage total copper spoke actual to defined
+    cPolyCopperMinPC = 50;      // minimim percentage total copper spoke (or solid) actual to defined
+
 var
     Board      : IPCB_Board;
     LayerStack : IPCB_MasterLayerStack;
@@ -89,16 +99,17 @@ function MeasureQoC(PVPrim, PolyReg : IPCB_Primitive, const Expand : TCoord, con
 
 procedure DetectViaAndPads;
 var
+    ViaMan         : IPCB_ViaManager;
     Iter           : IPCB_BoardIterator;
     Iter2          : IPCB_BoardIterator;
     PGIter         : IPCB_GroupIterator;
     PlaneIter      : IPCB_BoardIterator;
     SPRGIter       : IPCB_GroupIterator;
     Via            : IPCB_Via;
+    ViaType        : IVia_Type;
     Pad            : IPCB_Pad;
     PVNet          : IPCB_Net;
     SPNet          : IPCB_Net;
-    NetName        : WideString;
     Violation      : IPCB_Violation;
     Prim           : IPCB_Primitive;
     PVPrim         : IPCB_Primitive;
@@ -133,6 +144,7 @@ var
     PercentPM      : extended;
     FilePath       : WideString;
     i : integer;
+    dlgResult      : boolean;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -152,6 +164,8 @@ begin
         Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
 
     BeginHourGlass(crHourGlass);
+
+    if MajorADVersion > 17 then ViaMan := Board.ViaManager;
     PCBServer.PCBContourMaker.SetState_ArcResolution(MilsToCoord(cArcResolution));
     PCBServer.PreProcess;
 
@@ -162,6 +176,7 @@ begin
 
     PLayerSet := LayerSetUtils.EmptySet;
     PLayerSet.IncludeSignalLayers;
+    PLayerSet.IncludeInternalPlaneLayers;
     PLayerSet.Include(eMultiLayer);
 
     Iter := Board.BoardIterator_Create;
@@ -178,8 +193,6 @@ begin
 
         NetName := '<no net>';
         PVNet := PVPrim.Net;
-        if PVPrim.InNet then
-            NetName := PVNet.Name;
         PVPrim.SetState_DRCError(false);           // clear marker used without REAL violation object
         bPrimViolates := false;
 
@@ -191,10 +204,18 @@ begin
             Pad := PVPrim;
         end;
         if PVPrim.ObjectId = eViaObject then
-            Via := PVPrim;
+        begin
+             Via := PVPrim;
+             ViaType := eViaThruHole;
+             if MajorADVersion > 17 then
+             begin
+                 ViaType := ViaMan.GetViaType(Via);
+//               if ViaType =  eViaStitching then
+            end;
+        end;
 
         if cReport then
-            Rpt.Add(PVPrim.ObjectIDString + ' | ' + NetName);
+            Rpt.Add(PVPrim.Descriptor + ' | '+  PVPrim.Detail);
 
         LayerObj := LayerStack.First(eLayerClass_Electrical);
         while LayerObj <> nil do
@@ -269,7 +290,6 @@ begin
                             PolyTotWidth := PPConnWidth * PPReliefs;
                         end;
 
-
                         PPD := Board.PrimPrimDistance(Prim, PVPrim);
                         if cReport then
                             Rpt.Add('--- ' +  Prim.ObjectIDString + ' | ' + CoordUnitToString(PPD, eMils) );
@@ -286,14 +306,8 @@ begin
                             if cReport then
                                 Rpt.Add('--- copper: ' + FloatToStr(PercentCopper) + ' % |  Perimeter ' + FloatToStr(PercentPM) + ' %');
 
-                            if PercentCopper < cPolyCopperMinPC then Connected := false;
-{
-                            if PPCS = eDirectConnectToPlane then
-                            if (PercentCopper * 0.99) < 100 then Connected := false;
+                            if (PercentCopper / PercentPM * 100) < cPolyCopperMinPC then Connected := false;
 
-                            if PPCS = eReliefConnectToPlane then
-                            if (PercentCopper * 0.99) < PercentPM then Connected := false;
-}
 // this would have PPD > 0!
 //                            if PPCS = eNoConnect then
 //                            if (PercentCopper > 0) then Connected := true;
@@ -328,14 +342,13 @@ begin
                         Rule2 := Board.FindDominantRuleForObjectPair(PVPrim, SplitPlane, eRule_PowerPlaneConnectStyle);
                         if Rule2 <> nil then
                         begin
-                            PPCS         := Rule2.PlaneConnectStyle;        // 0 relief, 1 direct, 2 no connect
+                            PPCS         := Rule2.PlaneConnectStyle;
                             PPReliefs    := Rule2.ReliefEntries;
                             PPConnWidth  := Rule2.ReliefConductorWidth;
                             PlaneRX      := Rule2.ReliefExpansion;
                             PolyTotWidth := PPConnWidth * PPReliefs;
-
                         end;
-//  no psuedo pad shape & spokes generated.                      //  eNoConnect 
+//  no psuedo pad shape & spokes generated.                      //  eNoConnect
                         if PPCS <> eReliefConnectToPlane then
                             PlaneRx := 0;
 
@@ -402,6 +415,11 @@ begin
 
         if cReport then Rpt.Add('');
 
+        if ((ViolCount2 + 1) Mod cMaxViolationPrims) = 0 then
+        begin
+            dlgResult := ConfirmNoYesWithCaption('Lots of Violating Primitives ' + IntToStr(ViolCount2), 'Continue ? ');
+            if not dlgResult then break;
+        end;
         PVPrim := Iter.NextPCBObject;
     end;
 
@@ -446,9 +464,8 @@ begin
 
     Board.ViewManager_FullUpdate;
 //    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
-    ShowInfo (IntToStr(ViolCount2) + ' Pad&Via(s) with ' + IntToStr(ViolCount) +' removed pads & connection Violations found/DRC marked');
+    ShowInfo (IntToStr(ViolCount2) + ' Pad&Via(s) with ' + IntToStr(ViolCount) +' starved copper Violations found/DRC marked');
 end;
-
 
 // Just in case some clean up is required to remove stubborn violations..
 procedure CleanViolations;
@@ -544,11 +561,6 @@ begin
     PCBServer.DestroyPCBObject(RegionHole);
 
     Area1 := GMPC1.Area;
-    if (false) and (Area1 > 0) then
-    begin
-        GMPC1 := PCBServer.PCBContourMaker.MakeContour(PVPrim, Expand, eMultiLayer);
-        Area1 := GMPC1.Area;
-    end;
     if Area1 > 0 then
         Perimeter := PerimeterLength(GMPC1, true)
     else
