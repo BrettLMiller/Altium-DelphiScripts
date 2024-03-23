@@ -17,9 +17,8 @@ delete footprint..
 ..............................................................................}
 
 const
-    cMaxObjects       = 1000;      // safe low number
     AD19VersionMajor  = 19;
-    AD17MaxMechLayers = 32;       // scripting API has broken consts from TV6_Layer
+    AD17MaxMechLayers = 32;       
     AD19MaxMechLayers = 1024;
 
 var
