@@ -3,7 +3,8 @@
 
  Author: BL Miller
 
- 2024-03-23  v0.1  POC
+ 2024-03-23  0.1  POC
+ 2024-03-24  0.2  determine mech layers used first, more scalable with 1024 layers!
 
 Notes:
 Can NOT delete primitives that are referenced inside an iterator as this messes up "indexing".
@@ -44,6 +45,8 @@ Var
     HowManyInt        : Integer;
     intDialog         : Integer;
 
+    MLayerUsed        : TStringList;
+    MLIndex           : integer;
     MechLayer         : IPCB_MechanicalLayer;
     ML1               : integer;
     NewFPName         : WideString;
@@ -79,24 +82,36 @@ Begin
     LayerStack := Board.MasterLayerStack;
     SComp      := CurrentLib.GetState_CurrentComponent;
 
+    MLayerUsed := TStringList.Create;        // mech layer used by currnet FP prims
+    MLayerUsed.Sorted := true;
+    MLayerUsed.Duplicates := dupIgnore;
+    MLayerUsed.NameValueSeparator := '=';
+    MLayerUsed.StrictDelimiter := true;
+
     FPList := TObjectList.Create;            // hold a list of Comp Prims
     FPList.OwnsObjects := false;
 
     BeginHourGlass(crHourGlass);
     PCBServer.PreProcess;
 
-    HowManyInt  := 0;
-    MLayerSet := LayerSetUtils.CreateLayerSet;
-
     for i := 1 to MaxMechLayers do
     begin
         MechLayer := GetMechLayerObject(LayerStack, i, ML1);
-//        ML1 := MechLayer.LayerID;
+//  UsedByPrims is property of current FP !
+        if MechLayer.UsedByPrims then
+            MLayerUsed.Add(IntToStr(i) + '=' + IntToStr(ML1));
+    end;
 
-        MLayerSet.ExcludeAllLayers;
-        MLayerSet.Include(ML1);
+    HowManyInt  := 0;
+//    MLayerSet := LayerSetUtils.CreateLayerSet;
+//        MLayerSet.ExcludeAllLayers;
+//        MLayerSet.Include(ML1);
 
-// just test all mech layers even if not "enabled", .UsedByPrims() is global.
+    for i := 0 to (MLayerUsed.Count -1) do
+    begin
+        MLIndex := MLayerUsed.Names(i);
+        ML1     := MLayerUsed.ValueFromIndex(i);
+
         if (true) or MechLayer.MechanicalLayerEnabled then
         begin
             FPList.Clear;
@@ -105,7 +120,7 @@ Begin
             Prim := GIterator.FirstPCBObject;
             while Prim <> Nil Do
             begin
-                if MLayerSet.Contains(Prim.Layer) then
+                if Prim.Layer = ML1 then
                     FPList.Add(Prim);
                 Prim := GIterator.NextPCBObject;
             end;
@@ -113,7 +128,7 @@ Begin
 
             if FPList.Count > 0 then
             begin
-                NewFPName := SComp.Name + '_MECHLAYER' + IntToStr(i);
+                NewFPName := SComp.Name + '_MECHLAYER' + IntToStr(MLIndex);
                 NewFP      := CurrentLib.CreateNewComponent;
                 NewFP.Name := CurrentLib.GetUniqueCompName(NewFPName);
                 CurrentLib.RegisterComponent(NewFP);
@@ -142,6 +157,7 @@ Begin
 
     FPList.Clear;
     FPList.Destroy;
+    MLayerUsed.Clear;
     PCBServer.PostProcess;
 
 //    CurrentLib.Navigate_FirstComponent;
