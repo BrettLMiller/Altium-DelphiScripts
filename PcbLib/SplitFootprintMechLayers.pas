@@ -27,7 +27,7 @@ var
     MaxMechLayers     : integer;
     LegacyMLS         : boolean;
 
-function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) : IPCB_MechanicalLayer; forward;
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, const i : integer, var MLID : TLayer) : IPCB_MechanicalLayer; forward;
 
 Procedure SplitFootprint;
 Var
@@ -83,8 +83,8 @@ Begin
     SComp      := CurrentLib.GetState_CurrentComponent;
 
     MLayerUsed := TStringList.Create;        // mech layer used by currnet FP prims
-    MLayerUsed.Sorted := true;
-    MLayerUsed.Duplicates := dupIgnore;
+//    MLayerUsed.Sorted := true;
+//    MLayerUsed.Duplicates := dupIgnore;
     MLayerUsed.NameValueSeparator := '=';
     MLayerUsed.StrictDelimiter := true;
 
@@ -128,7 +128,7 @@ Begin
 
             if FPList.Count > 0 then
             begin
-                NewFPName := SComp.Name + '_MECHLAYER' + IntToStr(MLIndex);
+                NewFPName  := SComp.Name + '_MECHLAYER' + IntToStr(MLIndex);
                 NewFP      := CurrentLib.CreateNewComponent;
                 NewFP.Name := CurrentLib.GetUniqueCompName(NewFPName);
                 CurrentLib.RegisterComponent(NewFP);
@@ -171,7 +171,7 @@ Begin
     if HowManyInt > 0 then CurrentLib.Board.SetState_DocumentHasChanged;
 End;
 {..............................................................................}
-function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
+function GetMechLayerObject(LS: IPCB_MasterLayerStack, const i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
 begin
     if (LegacyMLS) then
     begin
