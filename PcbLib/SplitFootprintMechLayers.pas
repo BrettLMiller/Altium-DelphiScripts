@@ -5,6 +5,7 @@
 
  2024-03-23  0.1  POC
  2024-03-24  0.2  determine mech layers used first, more scalable with 1024 layers!
+ 2024-03-27  0.21 approximate percentage complete statusbar & run time.
 
 Notes:
 Can NOT delete primitives that are referenced inside an iterator as this messes up "indexing".
@@ -19,13 +20,15 @@ delete footprint..
 
 const
     AD19VersionMajor  = 19;
-    AD17MaxMechLayers = 32;       
+    AD17MaxMechLayers = 32;
     AD19MaxMechLayers = 1024;
+    cStatusUpdate     = 500;
 
 var
     VerMajor          : integer;
     MaxMechLayers     : integer;
     LegacyMLS         : boolean;
+    GUIMan            : IGUIManager;
 
 function GetMechLayerObject(LS: IPCB_MasterLayerStack, const i : integer, var MLID : TLayer) : IPCB_MechanicalLayer; forward;
 
@@ -42,15 +45,20 @@ Var
     Prim              : IPCB_Primitive;
     Prim2             : IPCB_Primitive;
 
-    HowManyInt        : Integer;
-    intDialog         : Integer;
-
     MLayerUsed        : TStringList;
     MLIndex           : integer;
     MechLayer         : IPCB_MechanicalLayer;
     ML1               : integer;
     NewFPName         : WideString;
     MLayerSet         : IPCB_LayerSet;
+
+    HowManyInt        : Integer;
+    intDialog         : Integer;
+    sStatusBar        : WideString;
+    iStatusBar        : integer;
+    TotPrims          : integer;
+    StartTime         : TDateTime;
+    StopTime          : TDateTime;
 
 Begin
     CurrentLib := PCBServer.GetCurrentPCBLibrary;
@@ -68,6 +76,7 @@ Begin
         Exit;
     end;
 
+    GUIMan   := Client.GUIManager;
     VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     MaxMechLayers := AD17MaxMechLayers;
@@ -81,16 +90,16 @@ Begin
     Board := CurrentLib.Board;
     LayerStack := Board.MasterLayerStack;
     SComp      := CurrentLib.GetState_CurrentComponent;
+    if SComp = nil then exit;
 
-    MLayerUsed := TStringList.Create;        // mech layer used by currnet FP prims
-//    MLayerUsed.Sorted := true;
-//    MLayerUsed.Duplicates := dupIgnore;
+    MLayerUsed := TStringList.Create;        // mech layers used by current FP mechlayer prims.
     MLayerUsed.NameValueSeparator := '=';
     MLayerUsed.StrictDelimiter := true;
 
     FPList := TObjectList.Create;            // hold a list of Comp Prims
     FPList.OwnsObjects := false;
 
+    StartTime := Time;
     BeginHourGlass(crHourGlass);
     PCBServer.PreProcess;
 
@@ -103,9 +112,8 @@ Begin
     end;
 
     HowManyInt  := 0;
-//    MLayerSet := LayerSetUtils.CreateLayerSet;
-//        MLayerSet.ExcludeAllLayers;
-//        MLayerSet.Include(ML1);
+//  approximate total low burden count.
+    TotPrims := SComp.GetPrimitiveCount(AllObjects);
 
     for i := 0 to (MLayerUsed.Count -1) do
     begin
@@ -147,10 +155,16 @@ Begin
 // this new CMP FP is focused so origin is different to source !!
                 Prim2.MoveByXY(Board.XOrigin, Board.YOrigin);
                 inc(HowManyInt);
+
+                if (J MOD cStatusUpdate) = 0 then
+                begin
+                    iStatusBar := Int(HowManyInt / ToTPrims * 100);
+                    sStatusBar := ' moving.. : ' + IntToStr(iStatusBar) + '% done';
+                    GUIMan.StatusBar_SetState (1, sStatusBar);
+                end;
             end;
 
-            if FPList.Count > 0 then
-                NewFP.EndModify;
+            if FPList.Count > 0 then NewFP.EndModify;
 
         end;
     end;
@@ -167,8 +181,10 @@ Begin
     CurrentLib.Board.GraphicalView_ZoomRedraw;
     CurrentLib.RefreshView;
     EndHourGlass;
+    StopTime := Time;
 
     if HowManyInt > 0 then CurrentLib.Board.SetState_DocumentHasChanged;
+    ShowMessage('Moved ' + IntToStr(HowManyInt) + ' mech layer primitives in '+ IntToStr((StopTime-StartTime)*24*3600) +' sec ');
 End;
 {..............................................................................}
 function GetMechLayerObject(LS: IPCB_MasterLayerStack, const i : integer, var MLID : TLayer) : IPCB_MechanicalLayer;
