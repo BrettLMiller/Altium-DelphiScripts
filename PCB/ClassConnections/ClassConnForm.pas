@@ -101,12 +101,12 @@ end;
 
 procedure TCCForm.Button1Click(Sender);   // Show Connections
 begin
-    Action(ComboBox1.Text, ComboBox2.Text, 1);
+    ActionRatNests(ComboBox1.Text, ComboBox2.Text, 1);
 End;
 
 procedure TCCForm.Button2Click(Sender);  // Hide Connections
 begin
-    Action(ComboBox1.Text, ComboBox2.Text, 0);
+    ActionRatNests(ComboBox1.Text, ComboBox2.Text, 0);
 End;
 
 procedure TCCForm.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -124,28 +124,30 @@ end;
 
 procedure TCCForm.butShowAllClick(Sender: TObject);
 begin
-    Action(cAllNetsClass, cAllCMPsClass, 1);
+    ActionRatNests(cAllNetsClass, cAllCMPsClass, 1);
 end;
 
 procedure TCCForm.butHideAllClick(Sender: TObject);
 begin
-    Action(cAllNetsClass, cAllCMPsClass, 0);
+    ActionRatNests(cAllNetsClass, cAllCMPsClass, 0);
 end;
 
 procedure TCCForm.ColorDialog1Close(Sender: TObject);
+var
+    Colour : TColor;
 begin
-    ActionColour(CCForm.ColorDialog1.Color);
+    Colour := CCForm.ColorDialog1.Color;
+    ActionColour(ComboBox1.Text, ComboBox2.Text, Colour, 1);
 end;
 
 procedure TCCForm.ColorDialog1Show(Sender: TObject);
 begin
-    OldColour := CCForm.ColorDialog1.Color;
+//    OldColour := CCForm.ColorDialog1.Color;
 end;
 
 procedure TCCForm.butColourClick(Sender: TObject);
 begin
     CCForm.ColorDialog1.Execute;
-//    CCForm.ColorDialog1.DoShow;
 end;
 
 

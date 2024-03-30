@@ -6,6 +6,8 @@
  Allows PCB editing & PcbDoc switching/closing.
 
 modified BL Miller: rewritten in Delphiscript
+20230902  v1.10
+20240331  v1.20 fix bug in OR classes.
 
 }
 
@@ -15,7 +17,9 @@ procedure MoveTopOfClass(var LClasses : TObjectList, const CName : WideString); 
 function RefreshBoard(dummy : integer) : IPCB_Board; forward;
 function GetCMPClassNets(const CName : WideString) : TStringList; forward;
 function GetNetClassNets(const CName : WideString) : TStringList; forward;
+function GetNetList(const NetText, const CMPText : WideString) : TStringList; forward;
 procedure SetNetRatsNest(const slNetList : TStringList, const NetText : WideString, const State : integer); forward;
+procedure SetNetColour(const slNetList : TStringList, const NetText : WideString, const Colour : TColor); forward;
 
 const
     cAllNetsClass = 'All Nets';
@@ -53,7 +57,7 @@ end;
 
 function RefreshBoard(dummy : integer) : IPCB_Board;
 begin
-// Checks if the current document is a PCB document
+// Check current document is a PCB document
     Result := PCBServer.GetCurrentPCBBoard;
     Board  := Result;
     If Result = nil Then Exit;
@@ -76,15 +80,35 @@ begin
     if Operation = cLogicAND then Result := 'AND';
 end;
 
-procedure ActionColour(NewColour : TColor);
+procedure ActionColour(const NetText, const CMPText : WideString, NewColour : TColor, const State : integer);
+var
+    slNetList         : TStringList;
 begin
     bColourNets := false;
     if OldColour <> NewColour then
         bColourNets := true;
-    OldColour := NewColour
+
+    if State = 0 then
+        NewColour := Board.LayerColor(Prim.Layer)
+    else
+        OldColour := NewColour;
+
+    slNetList := GetNetList(NetText, CMPText);
+    SetNetColour(slNetList, NetText, NewColour);
+
+    slNetList.Free;
 end;
 
-procedure Action(const NetText, const CMPText : WideString, const State : integer);
+procedure ActionRatNests(const NetText, const CMPText : WideString, const State : integer);
+var
+    slNetList         : TStringList;
+begin
+    slNetList := GetNetList(NetText, CMPText);
+    SetNetRatsNest(slNetList, NetText, State);
+    slNetList.Free;
+end;
+
+function GetNetList(const NetText, const CMPText : WideString) : TStringList;
 var
     slNetClassNetList : TStringList;
     slCMPClassNetList : TStringList;
@@ -100,11 +124,11 @@ begin
         exit;
     end;
 
-    slNetList            := TStringList.Create;
-    slNetList.Sorted     := true;
-    slNetList.Duplicates := dupIgnore;
-    slCMPClassNetList    := TStringList.Create;
-    slNetClassNetList    := TStringList.Create;
+    Result            := TStringList.Create;
+    Result.Sorted     := true;
+    Result.Duplicates := dupIgnore;
+    slCMPClassNetList := TStringList.Create;
+    slNetClassNetList := TStringList.Create;
 
     if CMPText <> cAllCMPsClass then
         slCMPClassNetList := GetCMPClassNets (CMPText);
@@ -119,30 +143,26 @@ begin
         ANetName := slCMPClassNetList.Strings(I);
 
         if (Operation = cLogicOR) then
-            sLNetList.AddObject(ANetName, ANet);
+            Result.AddObject(ANetName, ANet);
 
         if (Operation = cLogicAND) then
         begin
             J := slNetClassNetList.IndexOf(ANetName);
 // present in both netlists
             if J > -1 then
-                sLNetList.AddObject(ANetName, ANet);
+                Result.AddObject(ANetName, ANet);
         end;
     end;
 // OR only
     if Operation = cLogicOR then
-    for I := 0 to (slCMPClassNetList.Count -1) do
+    for I := 0 to (slNetClassNetList.Count -1) do
     begin
         ANet := nil;
-        ANetName := slCMPClassNetList.Strings(I);
-        slNetList.AddObject(ANetName, ANet);
+        ANetName := slNetClassNetList.Strings(I);
+        Result.AddObject(ANetName, ANet);
     end;
     slCMPClassNetList.Free;
     slNetClassNetList.Free;
-
-    SetNetRatsNest(slNetList, NetText, State);
-
-    slNetList.Free;
 end;
 
 function GetCMPClassNets(const CName : WideString) : TStringList;
@@ -216,6 +236,66 @@ begin
     end;
 End;
 
+procedure SetNetColour(const slNetList : TStringList, const NetText : WideString, const Colour : TColor);
+var
+    Iterator : IPCB_BoardIterator;
+    Conn     : IPCB_Connection;
+    ANet     : IPCB_Net;
+    ANetName : WideString;
+    I        : integer;
+begin
+    Board.BeginModify;
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eNetObject));
+    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_Method(eProcessAll);
+    ANet := Iterator.FirstPCBObject;
+
+ // Look for net name match
+    While (ANet <> nil) do
+    begin
+        for I := 0 to (slNetList.Count - 1) do
+        begin
+            ANetName := slNetList.Strings(I);
+            If (NetText = cAllNetsClass) or (ANet.Name = ANetName) Then
+            begin
+// simplify later step if have all net objects
+                slNetList.Objects(I) := ANet;
+            end;
+        end;
+
+        Board.CleanNet(ANet);
+        ANet := Iterator.NextPcbObject;
+    end;
+
+    Iterator.AddFilter_ObjectSet(MkSet(eConnectionObject));
+    Conn := Iterator.FirstPCBObject;
+
+    While (Conn <> nil) do
+    begin
+        for I := 0 to (slNetList.Count - 1) do
+        begin
+            ANet := slNetList.Objects(I);
+
+            If (NetText = cAllNetsClass) or (Conn.Net = ANet) Then
+            begin
+                Conn.BeginModify;
+                ANet.BeginModify;
+                ANet.SetState_Color(Colour);
+                ANet.EndModify;
+                Conn.EndModify;
+                ANet.GraphicallyInvalidate;
+                Conn.GraphicallyInvalidate;
+            end;
+        end;
+        Conn := Iterator.NextPcbObject;
+    end;
+
+    Board.BoardIterator_Destroy(Iterator);
+    Board.EndModify;
+    Board.GraphicallyInvalidate;
+End;
+
 procedure SetNetRatsNest(const slNetList : TStringList, const NetText : WideString, const State : integer);    //Turn Net Connection ON or OFF
 var
     Iterator : IPCB_BoardIterator;
@@ -236,9 +316,9 @@ begin
         If (NetText = cAllNetsClass) then
         begin
             If State = 1 then
-                ANet.ConnectsVisible := True;
+                ANet.SetState_ConnectsVisible(True);
             If State = 0 then
-                ANet.ConnectsVisible := False;
+                ANet.SetState_ConnectsVisible(False);
         end else
         begin
             for I := 0 to (slNetList.Count - 1) do
@@ -247,9 +327,11 @@ begin
                 If (ANet.Name = ANetName) Then
                 begin
                     If State = 1 then
-                        ANet.ConnectsVisible := True;
+                        ANet.SetState_ConnectsVisible(True);
+//  ANet.ShowNetConnects;
                     If State = 0 then
-                        ANet.ConnectsVisible := False;
+                        ANet.SetState_ConnectsVisible(False);
+//  ANet.HideNetConnects;
 
 // simplify later step if all net objects
                      slNetList.Objects(I) := ANet;
@@ -266,6 +348,8 @@ begin
 
     While (Conn <> nil) do
     begin
+        Conn.GetState_Mode;  // eRatsNestConnection eBrokenNetMarker
+
         If (NetText = cAllNetsClass) then
         begin
             If State = 1 then
