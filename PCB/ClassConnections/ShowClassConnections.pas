@@ -9,6 +9,7 @@ modified BL Miller: rewritten in Delphiscript
 20230902  v1.10
 20240331  v1.20 fix bug in OR classes.
 20240401  v1.21 fix colour (was always previous value)& weird not updating show/hide Connections.
+20240402  v1.22 tiny performance improvement?, add default colour
 }
 
 function GetBoardClasses(ABoard : IPCB_Board, const ClassKind : Integer) : TObjectList; forward;
@@ -22,10 +23,11 @@ procedure SetNetRatsNest(const slNetList : TStringList, const NetText : WideStri
 procedure SetNetColour(const slNetList : TStringList, const NetText : WideString, const Colour : TColor); forward;
 
 const
-    cAllNetsClass = 'All Nets';
-    cAllCMPsClass = 'All Components';
-    cLogicOR   = 0;    // 'OR'
-    cLogicAND  = 1;    // 'AND'
+    cAllNetsClass  = 'All Nets';
+    cAllCMPsClass  = 'All Components';
+    cLogicOR       = 0;    // 'OR'
+    cLogicAND      = 1;    // 'AND'
+    cDefaultColour = $0075A19E;  // BRG 24bit default Connection object R=158,G=161,B=117
 
 var
     Board       : IPCB_Board;
@@ -125,8 +127,8 @@ begin
     end;
 
     Result            := TStringList.Create;
-    Result.Sorted     := true;
-    Result.Duplicates := dupIgnore;
+//    Result.Sorted     := true;
+//    Result.Duplicates := dupIgnore;
     slCMPClassNetList := TStringList.Create;
     slNetClassNetList := TStringList.Create;
 
@@ -142,15 +144,19 @@ begin
         ANet := slCMPClassNetList.Objects(I);
         ANetName := slCMPClassNetList.Strings(I);
 
-        if (Operation = cLogicOR) then
-            Result.AddObject(ANetName, ANet);
-
-        if (Operation = cLogicAND) then
+        J := Result.IndexOf(ANetName);
+        if J < 0 then
         begin
-            J := slNetClassNetList.IndexOf(ANetName);
-// present in both netlists
-            if J > -1 then
+            if (Operation = cLogicOR) then
                 Result.AddObject(ANetName, ANet);
+
+            if (Operation = cLogicAND) then
+            begin
+                J := slNetClassNetList.IndexOf(ANetName);
+// present in both netlists
+                if J > -1 then
+                    Result.AddObject(ANetName, ANet);
+            end;
         end;
     end;
 // OR only
@@ -159,8 +165,10 @@ begin
     begin
         ANet := nil;
         ANetName := slNetClassNetList.Strings(I);
-        Result.AddObject(ANetName, ANet);
-    end;
+        J := Result.IndexOf(ANetName);
+        if J < 0 then
+            Result.AddObject(ANetName, ANet);
+     end;
     slCMPClassNetList.Free;
     slNetClassNetList.Free;
 end;
@@ -283,8 +291,6 @@ begin
                 ANet.EndModify;
                 ANet.GraphicallyInvalidate;
                 Conn.GraphicallyInvalidate;
-//                Board.AnalyzeNet(ANet);
-                Board.CleanNet(ANet);
             end;
         end;
         Conn := Iterator.NextPcbObject;
@@ -362,7 +368,6 @@ begin
                 Board.HidePCBObject(Conn);
 
             ANet := Conn.Net;
-            Board.CleanNet(ANet);
             ANet.GraphicallyInvalidate;
             Conn.GraphicallyInvalidate;
         end else
@@ -381,12 +386,19 @@ begin
                     ANet.EndModify;
                     ANet.GraphicallyInvalidate;
                     Conn.GraphicallyInvalidate;
-                    Board.CleanNet(ANet);
                 end;
             end;
         end;
         Conn.EndModify;
         Conn := Iterator.NextPcbObject;
+
+    end;
+
+    for I := 0 to (slNetList.Count - 1) do
+    begin
+        ANet := slNetList.Objects(I);
+        If State <> 0 then
+            Board.CleanNet(ANet);
     end;
 
     Board.BoardIterator_Destroy(Iterator);

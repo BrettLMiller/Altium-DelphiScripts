@@ -25,23 +25,23 @@ object CCForm: TCCForm
     TabOrder = 0
     Text = 'cb1-NetClasses'
   end
-  object Button1: TButton
+  object butShow: TButton
     Left = 21
     Top = 90
     Width = 99
     Height = 25
     Caption = 'Show Connections'
     TabOrder = 1
-    OnClick = Button1Click
+    OnClick = butShowClick
   end
-  object Button2: TButton
+  object butHide: TButton
     Left = 142
     Top = 90
     Width = 98
     Height = 25
     Caption = 'Hide Connections'
     TabOrder = 2
-    OnClick = Button2Click
+    OnClick = butHideClick
   end
   object ComboBox2: TComboBox
     Left = 23
@@ -51,7 +51,7 @@ object CCForm: TCCForm
     TabOrder = 3
     Text = 'cb1-CMPClasses'
   end
-  object Button3: TButton
+  object butLogic: TButton
     Left = 228
     Top = 13
     Width = 60
@@ -59,7 +59,7 @@ object CCForm: TCCForm
     Caption = 'AND/OR'
     Style = bsSplitButton
     TabOrder = 4
-    OnClick = Button3Click
+    OnClick = butLogicClick
   end
   object butShowAll: TButton
     Left = 21
@@ -88,8 +88,17 @@ object CCForm: TCCForm
     TabOrder = 7
     OnClick = butColourClick
   end
+  object butDefColour: TButton
+    Left = 256
+    Top = 121
+    Width = 39
+    Height = 25
+    Caption = 'Default'
+    TabOrder = 8
+    OnClick = butDefColourClick
+  end
   object ColorDialog1: TColorDialog
     Left = 264
-    Top = 120
+    Top = 52
   end
 end
