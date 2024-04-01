@@ -8,7 +8,7 @@
 modified BL Miller: rewritten in Delphiscript
 20230902  v1.10
 20240331  v1.20 fix bug in OR classes.
-
+20240401  v1.21 fix colour (was always previous value)& weird not updating show/hide Connections.
 }
 
 function GetBoardClasses(ABoard : IPCB_Board, const ClassKind : Integer) : TObjectList; forward;
@@ -95,7 +95,7 @@ begin
 
     slNetList := GetNetList(NetText, CMPText);
     SetNetColour(slNetList, NetText, NewColour);
-
+//    Board.ViewManager_FullUpdate;
     slNetList.Free;
 end;
 
@@ -264,7 +264,6 @@ begin
             end;
         end;
 
-        Board.CleanNet(ANet);
         ANet := Iterator.NextPcbObject;
     end;
 
@@ -277,15 +276,15 @@ begin
         begin
             ANet := slNetList.Objects(I);
 
-            If (NetText = cAllNetsClass) or (Conn.Net = ANet) Then
+            If (Conn.Net = ANet) Then
             begin
-                Conn.BeginModify;
                 ANet.BeginModify;
                 ANet.SetState_Color(Colour);
                 ANet.EndModify;
-                Conn.EndModify;
                 ANet.GraphicallyInvalidate;
                 Conn.GraphicallyInvalidate;
+//                Board.AnalyzeNet(ANet);
+                Board.CleanNet(ANet);
             end;
         end;
         Conn := Iterator.NextPcbObject;
@@ -304,6 +303,7 @@ var
     ANetName : WideString;
     I        : integer;
 begin
+    Board.BeginModify;
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eNetObject));
     Iterator.AddFilter_LayerSet(AllLayers);
@@ -315,10 +315,13 @@ begin
     begin
         If (NetText = cAllNetsClass) then
         begin
+            ANet.BeginModify;
             If State = 1 then
                 ANet.SetState_ConnectsVisible(True);
             If State = 0 then
                 ANet.SetState_ConnectsVisible(False);
+            ANet.EndModify;
+            ANet.GraphicallyInvalidate;
         end else
         begin
             for I := 0 to (slNetList.Count - 1) do
@@ -326,12 +329,15 @@ begin
                 ANetName := slNetList.Strings(I);
                 If (ANet.Name = ANetName) Then
                 begin
+                    ANet.BeginModify;
                     If State = 1 then
                         ANet.SetState_ConnectsVisible(True);
 //  ANet.ShowNetConnects;
                     If State = 0 then
                         ANet.SetState_ConnectsVisible(False);
 //  ANet.HideNetConnects;
+                    ANet.EndModify;
+                    ANet.GraphicallyInvalidate;
 
 // simplify later step if all net objects
                      slNetList.Objects(I) := ANet;
@@ -339,7 +345,6 @@ begin
             end;
         end;
 
-        Board.CleanNet(ANet);
         ANet := Iterator.NextPcbObject;
     end;
 
@@ -348,14 +353,18 @@ begin
 
     While (Conn <> nil) do
     begin
-        Conn.GetState_Mode;  // eRatsNestConnection eBrokenNetMarker
-
+        Conn.BeginModify;
         If (NetText = cAllNetsClass) then
         begin
             If State = 1 then
                 Board.ShowPCBObject(Conn);
             If State = 0 then
                 Board.HidePCBObject(Conn);
+
+            ANet := Conn.Net;
+            Board.CleanNet(ANet);
+            ANet.GraphicallyInvalidate;
+            Conn.GraphicallyInvalidate;
         end else
         begin
             for I := 0 to (slNetList.Count - 1) do
@@ -364,17 +373,24 @@ begin
 
                 If Conn.Net = ANet Then
                 begin
+                    ANet.BeginModify;
                     If State = 1 then
                         Board.ShowPCBObject(Conn);
                     If State = 0 then
                         Board.HidePCBObject(Conn);
+                    ANet.EndModify;
+                    ANet.GraphicallyInvalidate;
+                    Conn.GraphicallyInvalidate;
+                    Board.CleanNet(ANet);
                 end;
             end;
         end;
+        Conn.EndModify;
         Conn := Iterator.NextPcbObject;
     end;
 
     Board.BoardIterator_Destroy(Iterator);
+    Board.EndModify;
     Board.GraphicallyInvalidate;
 End;
 

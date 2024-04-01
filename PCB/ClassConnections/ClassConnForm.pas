@@ -24,7 +24,7 @@ end;
 
 function TCCForm.FormCreate(Sender: TObject);
 begin
-    CCForm.Caption := CCForm .Caption + '_V0.2';
+    CCForm.Caption := CCForm .Caption + '_V0.21';
     CCForm.Button3.Caption := SetOperation(false);
     CCForm.ColorDialog1.Color := clRed;
 End;
@@ -132,22 +132,15 @@ begin
     ActionRatNests(cAllNetsClass, cAllCMPsClass, 0);
 end;
 
-procedure TCCForm.ColorDialog1Close(Sender: TObject);
+procedure TCCForm.butColourClick(Sender: TObject);
 var
     Colour : TColor;
 begin
-    Colour := CCForm.ColorDialog1.Color;
-    ActionColour(ComboBox1.Text, ComboBox2.Text, Colour, 1);
-end;
-
-procedure TCCForm.ColorDialog1Show(Sender: TObject);
-begin
-//    OldColour := CCForm.ColorDialog1.Color;
-end;
-
-procedure TCCForm.butColourClick(Sender: TObject);
-begin
-    CCForm.ColorDialog1.Execute;
+    if CCForm.ColorDialog1.Execute then
+    begin
+        Colour := CCForm.ColorDialog1.Color;
+        ActionColour(ComboBox1.Text, ComboBox2.Text, Colour, 1);
+    end;
 end;
 
 

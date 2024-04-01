@@ -90,17 +90,17 @@ GenerateClassCluster=0
 DocumentUniqueId=
 
 [Parameter1]
-Name=Author Original
-Value=www.tdpcb.com
+Name=Version
+Value=1.21
 
 [Parameter2]
 Name=Modified By
 Value=BL Miller
 
 [Parameter3]
-Name=Version
-Value=1.20
+Name=Author Original
+Value=www.tdpcb.com
 
 [Generic_ScriptingSystem]
-StartProcName=>Start
+StartProcName=>
 

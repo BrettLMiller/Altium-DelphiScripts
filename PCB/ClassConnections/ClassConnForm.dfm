@@ -89,8 +89,6 @@ object CCForm: TCCForm
     OnClick = butColourClick
   end
   object ColorDialog1: TColorDialog
-    OnClose = ColorDialog1Close
-    OnShow = ColorDialog1Show
     Left = 264
     Top = 120
   end
