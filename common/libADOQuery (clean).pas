@@ -377,7 +377,7 @@ begin
         exit;
     end;
 
-    DBLib := IntLibMan.GetAvailableDBLibDocAtPath( dbLibraryName );
+    DBLib := IntegratedLibraryManager.GetAvailableDBLibDocAtPath( dbLibraryName );
     libADOStaticInit(DBLib.GetConnectionString);
 
     TStart := Time;         //                              Where   = val   Select
