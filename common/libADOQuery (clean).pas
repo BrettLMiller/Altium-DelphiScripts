@@ -41,12 +41,12 @@ Functions use read only queries.
             libADOQuery.Parameters.ParamByName('iD');
             ConnectStr := ADOConn.ConnectionString;
 
-        ADOConn.DefaultDatabase := dbLibraryFile;
+//        ADOConn.DefaultDatabase := dbLibraryFile;
 }
 
 const
 {
-// Jet  32bit
+// Jet 32bit
     dbConnectionStr1 = 'Provider=MICROSOFT.JET.OLEDB.4.0;Data Source=';
     dbConnectionStr2 = ';Persist Security Info=False';
     dbConnectionStr3 = ';Mode=Read';          // read mode
@@ -57,15 +57,15 @@ const
     dbConnectionStr2 = ';Mode=Read';
     dbConnectionStr3 = ';Extended Properties="";Jet OLEDB:System database="";Jet';
 
-// Only used for unit self test
+// Only for unit self test
     cdbLibraryName   = 'C:\Altium Projects\dB-Libraries\Inductor.MDB';
     cdbTableName     = 'Inductor';
     cdbCompName      = 'IND_100NH_0A03_0402_2%';
     cdbPrimaryKey    = 'Part Number';
 
-    clibADOError           = 2;
-    clibADOOpen            = 1;
-    clibADOClosed          = 0;
+    clibADOError          = 2;
+    clibADOOpen           = 1;
+    clibADOClosed         = 0;
     clibADOConnStringDS    = 'Data Source';
     clibADOConnStringMode  = 'Mode';
     cLibADOConnStrModeRead = 'Read';
@@ -77,7 +77,7 @@ var
     libADODataset   : TADODataSet;
     libADOstate     : Integer;
     libADOActiveDB  : WideString;
-    libADOConnStr   : WideString;      // scripts ADO DB connection
+    libADOConnStr   : WideString;      // scripts ADO connection
     libADOConnStrA  : WideString;      // Altiums' internal DB connection
 
 function libADOQueryGetDBLibDataBaseFile(ConnString : WideString) : WideString;
@@ -345,7 +345,7 @@ end;
 
 
 // no proper var init & no static local vars in Delphiscript so try hide the shared vars
-function libADOStaticInit( const dummy : integer);
+function libADOStaticInit( const DBCS : WideString);
 begin
     libADOstate    := clibADOClosed;
     libADOConn     := nil;
@@ -353,12 +353,13 @@ begin
     libADODataset  := nil;
     libADOActiveDB := 'Not Connected';
     libADOConnStr  := '';
-    libADOConnStrA := '';
+    libADOConnStrA := DBCS;
 end;
 
 // local self unit test.
 procedure libADOUnitTest;
 var
+    DBLib         : IDatabaseLibDocument;
     dbTableName   : WideString;
     dbLibraryName : WideString;      // full path file name
     AllPKList     : TStringList;
@@ -376,7 +377,8 @@ begin
         exit;
     end;
 
-    libADOStaticInit(1);
+    DBLib := IntLibMan.GetAvailableDBLibDocAtPath( dbLibraryName );
+    libADOStaticInit(DBLib.GetConnectionString);
 
     TStart := Time;         //                              Where   = val   Select
     AllPKList := libADOColumnQuery( dbLibraryName, dbTableName, '', '*', cdbPrimaryKey );
