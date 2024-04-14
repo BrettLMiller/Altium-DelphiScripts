@@ -53,6 +53,7 @@ Notes:
  2023-07-11 1.52 Attempt to minimise _V7 methods.
  2023-07-12 1.53 V7 methods eliminated for AD19+, Import: if unpair existing then rename to reduce keyword name confusion.
  2023-08-17 1.54 LO.LayerID DNW above i=16 MUST use LO.V7_LayerID.ID
+ 2024-04-14 1.55 Add procedure to Hide unused mech layers.
 
   TMechanicalLayerToKindItem
 .............................................................................................
@@ -70,14 +71,13 @@ PCB:ExportMechLayers  FileName=
 const
     NoColour          = 'ncol';
     AD19VersionMajor  = 19;
-    AD17MaxMechLayers = 32;       // scripting API has broken consts from TV6_Layer
+    AD17MaxMechLayers = 32;       // scripting API has consts for TV6_Layer
     AD19MaxMechLayers = 1024;
     AllLayerDataMax   = 16;       // after this mech layer index only report the actual active layers.
     NoMechLayerKind   = 0;        // enum const does not exist for AD17/18
     ctTop             = 'Top';    // text used denote mech layer kind pairs.
     ctBottom          = 'Bottom';
     cNumPairKinds     = 12;        // number of layerpair kinds (inc. "Not Set")
-    cExportMLFilename = 'export-layerstack.stackup';
     cExportFNSuffix   = '-EML';
 
 var
@@ -93,12 +93,12 @@ var
     MechLayerPair     : TMechanicalLayerPair;       // IPCB_MechanicalLayerPairs.LayerPair(MechPairIdx)
     MechPairIdx       : integer;                    // index of above
     VerMajor          : integer;
+    LegacyMLS         : boolean;
     MaxMechLayers     : integer;
-    FileName      : String;
-    FilePath      : String;
-    INIFile       : TIniFile;
-    Flag          : Integer;
-    LegacyMLS     : boolean;
+    FileName          : String;
+    FilePath          : String;
+    INIFile           : TIniFile;
+    Flag              : Integer;
 
 function LayerPairKindToStr(LPK : TMechanicalLayerPairKind) : WideString;   forward;
 function LayerStrToPairKind(LPKS : WideString) : TMechanicalLayerPairKind;  forward;
@@ -111,23 +111,77 @@ function GuessLayerPairKind(MLayerKind : TMechanicalLayerKind) : TMechanicalLaye
 Procedure ConvertMechLayerKindToLegacy_Wrapped(dummy : integer);                           forward;
 function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : TLayer) :IPCB_MechanicalLayer;            forward;
 function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer; forward;
+function ShowHideMechLayers(const ShowUsed : boolean) : TLayer; forward;
 
 {.........................................................................................................}
 
+Procedure ShowUsedMechLayers;
+begin
+    ShowHideMechLayers(true);
+end;
+Procedure HideUnusedMechLayers;
+begin
+    ShowHideMechLayers(false);
+end;
+
+function ShowHideMechLayers(const ShowUsed : boolean) : TLayer;
+var
+    MechLayer  : IPCB_MechanicalLayer;
+    ML1        : integer;
+    i          : Integer;
+
+begin
+    Result := 0;
+    Board  := PCBServer.GetCurrentPCBBoard;
+    PCBLib := PCBServer.GetCurrentPCBLibrary;
+    if PCBLib <> nil then
+        Board := PCBLib.Board;
+    if Board = nil then exit;
+
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
+
+    MaxMechLayers := AD17MaxMechLayers;
+    LegacyMLS     := true;
+    if VerMajor >= AD19VersionMajor then
+    begin
+        LegacyMLS     := false;
+        MaxMechLayers := AD19MaxMechLayers;
+    end;
+
+    LayerStack := Board.MasterLayerStack;
+
+    for i := 1 To MaxMechLayers do
+    begin
+        MechLayer := GetMechLayerObject(LayerStack, i, ML1);
+
+        if MechLayer.UsedByPrims = ShowUsed then
+        begin
+            MechLayer.IsDisplayed(Board) := ShowUsed;
+            Result := ML1;
+        end;
+    end;
+
+    if ShowUsed and (Result > 0) then
+        Board.CurrentLayer := Result;
+    Board.ViewManager_UpdateLayerTabs;
+end;
+
 Procedure UnPairCurrentMechLayer;
 var
-    ML1       : integer;
-    i         : Integer;
-    CurrLayer : TLayer;
+    ML1        : integer;
+    i          : Integer;
+    CurrLayer  : TLayer;
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
 
-    VerMajor := GetBuildNumberPart(Client.GetProductVersion); // Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     MaxMechLayers := AD17MaxMechLayers;
+    LegacyMLS     := true;
     if VerMajor >= AD19VersionMajor then
     begin
+        LegacyMLS     := false;
         MaxMechLayers := AD19MaxMechLayers;
     end;
 
@@ -153,12 +207,13 @@ var
     MechLayer        : IPCB_MechanicalLayer;
     SaveDialog       : TSaveDialog;
     dConfirm         : boolean;
-    slMechLayerPairs : TStringList;
+//    slMechLayerPairs : TStringList;
     slUsedPairKinds  : TStringList;
     ML1, ML2         : integer;
     i, j             : Integer;
     sColour          : WideString;
     bHasPairKinds    : boolean;
+    Parameters       : WideString;
 
 begin
     Board  := PCBServer.GetCurrentPCBBoard;
@@ -170,7 +225,7 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
-    VerMajor := GetBuildNumberPart(Client.GetProductVersion);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
@@ -206,20 +261,15 @@ begin
     IniFile := TIniFile.Create(FileName);
 
     BeginHourGlass(crHourGlass);
-                                              // FileName                                   //Prompt=false
-//    Client.SendMessage('PCB:ExportMechLayers', 'FileName' + FilePath + cExportMLFilename + '|DisableDialog=True' , 255, Client.CurrentView);
 
-    LayerStack := Board.MasterLayerStack;
-
-    MechLayerPairs   := Board.MechanicalPairs;
-//    slMechLayerPairs := FindAllMechPairLayers(LayerStack, MechLayerPairs);
-    slUsedPairKinds  := FindUsedPairKinds(MechLayerPairs);
+    LayerStack      := Board.MasterLayerStack;
+    MechLayerPairs  := Board.MechanicalPairs;
+    slUsedPairKinds := FindUsedPairKinds(MechLayerPairs);
     if slUsedPairKinds.Count > 0 then bHasPairKinds := true;
 
     for i := 1 to MaxMechLayers do
     begin
         MechLayer := GetMechLayerObject(LayerStack, i, ML1);
-//        ML1 := MechLayer.LayerID;
 
         if (i <= AllLayerDataMax) or MechLayer.MechanicalLayerEnabled then
         begin
@@ -425,12 +475,6 @@ begin
                 MLayerKind2        := LayerStrToKind(MLayerKindStr2);
                 MLayerPairKind2    := LayerStrToPairKind(MLayerPairKindStr2);
 
-//    if 2nd of the pair is not listed in initfile
-//                if not IniFile.SectionExists('MechLayer' + IntToStr(j)) then
-//                begin
-//                     use new Layer number
-//                end;
-
 // does ML2 name (from file) match ML1 paired layer name
 // simple layername text match for bottom vs top.
                 MechPairIdx := -1;
@@ -454,7 +498,7 @@ begin
                     end;
                 end;
 
-// Creating pairs automatically changes the names to Top & Bottom keywords first!
+// Creating pairs automatically changes the names to have prefix Top & Bottom first!
 // Altium tries to force/dictate its naming convention Top Bottom first so rewrite our names.
                 if (MechPairIdx > -1) then
                 begin
@@ -494,7 +538,7 @@ begin
         Board := PCBLib.Board;
     if Board = nil then exit;
 
-    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);   // Version(true).Strings(0);
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
@@ -659,15 +703,6 @@ begin
              break;
          end;
     end;
-end;
-
-function Version(const dummy : boolean) : TStringList;
-begin
-    Result               := TStringList.Create;
-    Result.Delimiter     := '.';
-//    Result.Duplicates    := dupAccept;   // requires .Sort
-    Result.DelimitedText := Client.GetProductVersion;
-    GetBuildNumberPart(Client.GetProductVersion, 0);
 end;
 
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
