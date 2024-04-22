@@ -26,20 +26,20 @@ object CCForm: TCCForm
     Text = 'cb1-NetClasses'
   end
   object butShow: TButton
-    Left = 21
+    Left = 20
     Top = 90
-    Width = 99
+    Width = 60
     Height = 25
-    Caption = 'Show Connections'
+    Caption = 'Show'
     TabOrder = 1
     OnClick = butShowClick
   end
   object butHide: TButton
-    Left = 142
+    Left = 95
     Top = 90
-    Width = 98
+    Width = 60
     Height = 25
-    Caption = 'Hide Connections'
+    Caption = 'Hide'
     TabOrder = 2
     OnClick = butHideClick
   end
@@ -62,40 +62,49 @@ object CCForm: TCCForm
     OnClick = butLogicClick
   end
   object butShowAll: TButton
-    Left = 21
-    Top = 122
-    Width = 99
+    Left = 20
+    Top = 125
+    Width = 60
     Height = 25
     Caption = 'Show All'
     TabOrder = 5
     OnClick = butShowAllClick
   end
   object butHideAll: TButton
-    Left = 142
-    Top = 122
-    Width = 98
+    Left = 95
+    Top = 125
+    Width = 60
     Height = 25
     Caption = 'Hide All'
     TabOrder = 6
     OnClick = butHideAllClick
   end
   object butColour: TButton
-    Left = 256
-    Top = 91
-    Width = 39
+    Left = 248
+    Top = 90
+    Width = 45
     Height = 25
     Caption = 'Colour'
     TabOrder = 7
     OnClick = butColourClick
   end
   object butDefColour: TButton
-    Left = 256
-    Top = 121
-    Width = 39
+    Left = 248
+    Top = 125
+    Width = 45
     Height = 25
     Caption = 'Default'
     TabOrder = 8
     OnClick = butDefColourClick
+  end
+  object butHighlight: TButton
+    Left = 170
+    Top = 90
+    Width = 60
+    Height = 25
+    Caption = 'Hi-Lite'
+    TabOrder = 9
+    OnClick = butHighlightClick
   end
   object ColorDialog1: TColorDialog
     Left = 264

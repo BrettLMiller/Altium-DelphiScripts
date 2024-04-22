@@ -12,6 +12,7 @@ type
     butHide      : TButton;
     butShowAll   : TButton;
     butHideAll   : TButton;
+    butHighlight : TButton;
     butColour    : TButton;
     butDefColour : TButton;
     ColorDialog1 : TColorDialog;
@@ -27,7 +28,7 @@ end;
 
 function TCCForm.FormCreate(Sender: TObject);
 begin
-    CCForm.Caption := CCForm .Caption + '_V0.22';
+    CCForm.Caption := CCForm .Caption + '_V0.23';
     CCForm.butLogic.Caption := SetOperation(false);
     CCForm.ColorDialog1.Color := clRed;
 End;
@@ -104,12 +105,12 @@ end;
 
 procedure TCCForm.butShowClick(Sender);   // Show Connections
 begin
-    ActionRatNests(ComboBox1.Text, ComboBox2.Text, 1);
+    ActionRatNests(ComboBox1.Text, ComboBox2.Text, cShow);
 End;
 
 procedure TCCForm.butHideClick(Sender);  // Hide Connections
 begin
-    ActionRatNests(ComboBox1.Text, ComboBox2.Text, 0);
+    ActionRatNests(ComboBox1.Text, ComboBox2.Text, cHide);
 End;
 
 procedure TCCForm.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -127,12 +128,17 @@ end;
 
 procedure TCCForm.butShowAllClick(Sender: TObject);
 begin
-    ActionRatNests(cAllNetsClass, cAllCMPsClass, 1);
+    ActionRatNests(cAllNetsClass, cAllCMPsClass, cShow);
 end;
 
 procedure TCCForm.butHideAllClick(Sender: TObject);
 begin
-    ActionRatNests(cAllNetsClass, cAllCMPsClass, 0);
+    ActionRatNests(cAllNetsClass, cAllCMPsClass, cHide);
+end;
+
+procedure TCCForm.butHighlightClick(Sender: TObject);
+begin
+    ActionRatNests(ComboBox1.Text, ComboBox2.Text, cHigh);
 end;
 
 procedure TCCForm.butColourClick(Sender: TObject);
