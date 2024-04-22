@@ -11,6 +11,8 @@ modified BL Miller: rewritten in Delphiscript
 20240401  v1.21 fix colour (was always previous value)& weird not updating show/hide Connections.
 20240402  v1.22 tiny performance improvement?, add default colour
 20240422  v1.30 refactor getting Net obj; add Hi-Lite button.
+20240422  v1.31 return to very slow reliable iterator & ObjectClass.IsMember() methods.
+                Alt method: Found a class member (designator) NOT in PCB!!
 }
 
 function GetBoardClasses(ABoard : IPCB_Board, const ClassKind : Integer) : TObjectList; forward;
@@ -174,8 +176,12 @@ begin
     slNetClassNetList.Free;
 end;
 
+// IPCB_ObjectClass methods are crap.
+// MemberName <> '' may NOT be safe!
+// change back to old proven method.
 function GetCMPClassNets(const CName : WideString) : TStringList;
 var
+    Iterator : IPCB_BoardIterator;
     CMP        : IPCB_Component;
     APad       : IPCB_Pad;
     ANet       : IPCB_Net;
@@ -188,16 +194,20 @@ begin
     Result.Sorted      := true;
     Result.Duplicates := dupIgnore;
 
-    for J := 0 to (CMPClasses.Count - 1) do
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    Iterator.AddFilter_LayerSet(SignalLayers);
+
+    CMP := Iterator.FirstPCBObject;
+    while CMP <> Nil Do
     begin
-        CMPClass := CMPClasses.Items(J);
-        If (CName = cAllCMPsClass) or (CName = CMPClass.Name) Then
+        for J := 0 to (CMPClasses.Count - 1) do
         begin
-            I := 0;
-            MemberName := CMPClass.MemberName(I);   // Get Members of Class
-            While (MemberName <> '') do
+            CMPClass := CMPClasses.Items(J);
+
+            if (CName = cAllCMPsClass) or (CName = CMPClass.Name) Then
+            if CMPClass.IsMember(CMP) then
             begin
-                CMP := Board.GetPcbComponentByRefDes(MemberName);
                 for P := 1 to CMP.GetPrimitiveCount(MkSet(ePadObject)) do
                 begin
                     ANetName := '';
@@ -209,12 +219,13 @@ begin
 
                         Result.AddObject(ANetName, ANet);
                     end;
-                end;
-                inc(I);
-                MemberName := CMPClass.MemberName(I);
-            end;
-        end;  // if
+                end; // P
+            end;  // if
+        end;  // J
+
+        CMP := Iterator.NextPCBObject;
     end;
+    Board.BoardIterator_Destroy(Iterator);
 end;
 
 function GetNetClassNets(const CName : WideString) : TStringList;
@@ -228,42 +239,25 @@ begin
     Result := TStringList.Create;
     Result.Sorted      := true;
     Result.Duplicates := dupIgnore;
-    ANet := nil;
-
-    for J := 0 to (NetClasses.Count - 1) do
-    begin
-        NetClass := NetClasses.Items(J);
-        If (CName = cAllNetsClass) or (CName = NetClass.Name) Then
-        begin
-            I := 0;
-            ANetName := NetClass.MemberName(I);   // Get Members of Class
-            While (ANetName <> '') do
-            begin
-                Result.AddObject(ANetName, ANet);
-
-                inc(I);
-                ANetName := NetClass.MemberName(I);
-            end;
-        end;  // if
-    end;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eNetObject));
     Iterator.AddFilter_LayerSet(AllLayers);
     Iterator.AddFilter_Method(eProcessAll);
-    ANet := Iterator.FirstPCBObject;
 
- // Look for net name match & get Net Object.
+    ANet := Iterator.FirstPCBObject;
     While (ANet <> nil) do
     begin
-        for I := 0 to (Result.Count - 1) do
+        ANetName := ANet.Name;
+        for J := 0 to (NetClasses.Count - 1) do
         begin
-            ANetName := Result.Strings(I);
-            If (ANet.Name = ANetName) Then
+            NetClass := NetClasses.Items(J);
+            if (CName = cAllNetsClass) or (CName = NetClass.Name) Then
+            if NetClass.IsMember(ANet) then
             begin
-// simplify later step if have all net objects
-                Result.Objects(I) := ANet;
-            end;
+                Result.AddObject(ANetName, ANet);
+
+            end;  // if
         end;
         ANet := Iterator.NextPcbObject;
     end;
