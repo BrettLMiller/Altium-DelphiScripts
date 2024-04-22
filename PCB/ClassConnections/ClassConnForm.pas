@@ -44,8 +44,9 @@ End;
 
 procedure TCCForm.CCFormMouseEnter(Sender: TObject);
 begin
-    RefreshBoard(1);
-    FormReloadDialogs(1);
+// DNW well with AD23 screws up form dialog.
+//    RefreshBoard(1);
+//    FormReloadDialogs(1);
 end;
 
 procedure FormReloadDialogs(dummy : integer);
