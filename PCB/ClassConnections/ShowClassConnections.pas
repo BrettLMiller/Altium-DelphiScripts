@@ -13,6 +13,7 @@ modified BL Miller: rewritten in Delphiscript
 20240422  v1.30 refactor getting Net obj; add Hi-Lite button.
 20240422  v1.31 return to very slow reliable iterator & ObjectClass.IsMember() methods.
                 Alt method: Found a class member (designator) NOT in PCB!!
+20240423  v1.32 The cAllxxxClass names are the internal names just use..
 }
 
 function GetBoardClasses(ABoard : IPCB_Board, const ClassKind : Integer) : TObjectList; forward;
@@ -27,7 +28,7 @@ procedure SetNetColour(const slNetList : TStringList, const Colour : TColor); fo
 
 const
     cAllNetsClass  = 'All Nets';
-    cAllCMPsClass  = 'All Components';
+    cAllCMPsClass  = 'All Components';    // internal name of Class
     cLogicOR       = 0;    // 'OR'
     cLogicAND      = 1;    // 'AND'
     cDefaultColour = $0075A19E;  // BRG 24bit default Connection object R=158,G=161,B=117
@@ -205,7 +206,7 @@ begin
         begin
             CMPClass := CMPClasses.Items(J);
 
-            if (CName = cAllCMPsClass) or (CName = CMPClass.Name) Then
+            if (CName = CMPClass.Name) Then
             if CMPClass.IsMember(CMP) then
             begin
                 for P := 1 to CMP.GetPrimitiveCount(MkSet(ePadObject)) do
@@ -235,6 +236,7 @@ var
     ANet     : IPCB_Net;
     ANetName : WideString;
     I, J     : integer;
+
 begin
     Result := TStringList.Create;
     Result.Sorted      := true;
@@ -252,8 +254,9 @@ begin
         for J := 0 to (NetClasses.Count - 1) do
         begin
             NetClass := NetClasses.Items(J);
-            if (CName = cAllNetsClass) or (CName = NetClass.Name) Then
-            if NetClass.IsMember(ANet) then
+
+            if (CName = NetClass.Name) then
+            if (CName = cAllNetsClass) or (NetClass.IsMember(ANet)) then
             begin
                 Result.AddObject(ANetName, ANet);
 
