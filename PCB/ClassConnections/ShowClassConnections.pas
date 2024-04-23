@@ -125,6 +125,8 @@ var
     ANet              : IPCB_Net;
     ANetName          : WideString;
     I, J              : integer;
+    LocalOperation    : integer;
+
 begin
     if Board = nil then
     begin
@@ -139,7 +141,15 @@ begin
     slCMPClassNetList := TStringList.Create;
     slNetClassNetList := TStringList.Create;
 
-    slCMPClassNetList := GetCMPClassNets (CMPText);
+// speedup ALLxx buttons
+    LocalOperation := Operation;
+    if (NetText = cAllNetsClass) and (CMPText = cAllCMPsClass) then
+    begin
+        LocalOperation := cLogicOR;
+    end
+    else
+        slCMPClassNetList := GetCMPClassNets (CMPText);
+
     slNetClassNetList := GetNetClassNets (NetText);
 
 // OR and AND combine
@@ -151,10 +161,10 @@ begin
         J := Result.IndexOf(ANetName);
         if J < 0 then
         begin
-            if (Operation = cLogicOR) then
+            if (LocalOperation = cLogicOR) then
                 Result.AddObject(ANetName, ANet);
 
-            if (Operation = cLogicAND) then
+            if (LocalOperation = cLogicAND) then
             begin
                 J := slNetClassNetList.IndexOf(ANetName);
 // present in both netlists
@@ -164,7 +174,7 @@ begin
         end;
     end;
 // OR only
-    if Operation = cLogicOR then
+    if LocalOperation = cLogicOR then
     for I := 0 to (slNetClassNetList.Count -1) do
     begin
         ANet     := slNetClassNetList.Objects(I);
