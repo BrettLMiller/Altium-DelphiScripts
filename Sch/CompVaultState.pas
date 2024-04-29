@@ -13,6 +13,7 @@ BL Miller.
 20/08/2021  v0.10 from RevState.pas
 21/08/2021  v0.11 Add DisconnectCompFromVault() strips VaultGUID from the comp & models
 2024-02-15  v0.20 Clear ALL GUIDs
+2024-04-30  v0.21 report ModelGUID & clear it as required.
 }
 
 const
@@ -86,6 +87,8 @@ begin
          Exit;
     End;
 
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion,0);
+
     IsLib := false;
     if CurrentSheet.ObjectID = eSchLib then IsLib := true;
     if IsLib then
@@ -119,7 +122,8 @@ begin
             CompName := DesignItemID;
 
         SourceLibName := Component.SourceLibraryName;
-        IsVault       := not Component.IsUnmanaged;
+        if (VerMajor > cMajorVerAD19) then
+            IsVault := not Component.IsUnmanaged;
         IsInteg       := Component.IsIntegratedComponent;
         UseLibName    := Component.UseLibraryName;
 
@@ -160,7 +164,8 @@ begin
             ModelItemGUID  := SchImpl.ModelItemGUID;
             ModelVaultGUID := SchImpl.ModelVaultGUID;
 
-            ReportInfo.Add(' Model detail  Name: ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +  '  old VaultGUID=' + ModelVaultGUID);
+            ReportInfo.Add(' Model detail  Name: ' + ModelName + '   Type : ' + SchImpl.ModelType +
+                           '  old GUID=' + ModelItemGUID + '  old VaultGUID=' + ModelVaultGUID);
 
             SchImpl := ImplIterator.NextSchObject;
         end;
@@ -263,8 +268,10 @@ begin
             ModelItemGUID  := SchImpl.ModelItemGUID;
             ModelVaultGUID := SchImpl.ModelVaultGUID;
 
-            ReportInfo.Add(' Model detail  Name: ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +  '  old VaultGUID=' + ModelVaultGUID);
+            ReportInfo.Add(' Model detail  Name: ' + ModelName + '   Type : ' + SchImpl.ModelType +
+                           '  old ModelGUID=' + ModelItemGUID + '  VaultGUID=' + ModelVaultGUID );
 
+            SchImpl.SetState_ModelItemGUID('');
             SchImpl.SetState_ModelVaultGUID('');
 
             SchImpl := ImplIterator.NextSchObject;
