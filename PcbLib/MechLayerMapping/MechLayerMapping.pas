@@ -20,7 +20,7 @@
 Mapping file:
   For each Destination MechLayer MLx 1 to 1024:
     ImportMLayer =  SourceMLm|SourceMLn|..   m & n are 1 to 1024 cardinal value.
-    ImportMLPrim =  Prims1|Prims2|.. where PrimsX = [ALTBRP]  All, Line, Text, Body, Region, Pad
+    ImportMLPrim =  Prims1|Prims2|.. where PrimsX = [ALTBRPO]  All, Line, Text, Body, Region, Pad & Other
     There is one-to-one mapping between value(s) of the above keys
     ImportMLayer=0 means source ML does NOT copy directly to destination.
     Other source layers listed after any first "0" are ignored.
@@ -47,6 +47,7 @@ Notes:
  2024-04-14  0.10 POC Create mapping file from PcbDoc/Lib & default mapping file..
  2024-05-09  0.20 change INIFile section key ImportLayer to ImportMLayer
  2024-05-10  0.22 ImportMLayer=0 stops that ML transferring directly. Begin Prim mask support.
+ 2024-05-10  0.23 support Prim mask Inifile Key ImportMLPrim=A|T
 
   TMechanicalLayerToKindItem
 
@@ -110,6 +111,7 @@ function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : Wi
 function GetValuesListForName(slList : TStringList, MLID : integer) : TStringList;       forward;
 function ConvertMLToMLID(slMLayerMapping : TStringList, BothNV : boolean) : TStringList; forward;
 function SourceToDestinationsMapping(slMLayerMapping: TStringList) : TStringList;        forward;
+function SimplePrimKindCode(Prim : IPCB_Primitive) : WideString; forward;
 
 
 {.........................................................................................................}
@@ -269,7 +271,7 @@ var
     slSMapLine         : TStringList;
     slDMapLine         : TStringList;
     slPrimsLine        : TStringList;
-    Prims              : WideString;
+    Prims, PCode       : WideString;
 
     sStatusBar         : WideString;
     iStatusBar         : integer;
@@ -332,10 +334,10 @@ begin
 
 //  read in primitive mask for import MLayers 'A' all is default for empty.
     slMLayerPrims := GetAllSectionKeysValInIniFile(IniFile1, 'ImportMLPrim', 'A');
+// using MLIDs is easier than cardinals later on..
     slMLayerPrims := ConvertMLToMLID(slMLayerPrims, false);
-
-// Generate Reverse/inverse mapping using MLIDs is easier than cardinals later on..
     slMLayerMapping := ConvertMLToMLID(slMLayerMapping, true);
+// Generate Reverse/inverse mapping S=D1|D2
     slMLayerMapSD   := SourceToDestinationsMapping(slMLayerMapping);
 
 //    Create new Destination PcbLib named from mapping filename.
@@ -344,7 +346,7 @@ begin
     ServerDoc  := CreateFreeSourceDoc(FolderPath, ChangefileExt(FileName,''), cDocKind_PcbLib);
     NewPcbLib  := PcbServer.LoadPCBLibraryByPath(ServerDoc.FileName);
 
-// attempts to be "clever" with the default empty FP caused one missing FP & one empty FP copy.
+// store & delete at finish..
     DumFootprint := NewPcbLib.GetComponent(0);
 
 //    Clear all Set all layers kinds pairs colours?
@@ -354,7 +356,7 @@ begin
     slSMapLine := TStringList.Create;
     slDMapLine := TStringList.Create;
 
-    FPrimList := TObjectList.Create;            // hold a list of Comp Prims to delete.
+    FPrimList := TObjectList.Create;            // hold a list of Comp Prims to delete & test before add..
     FPrimList.OwnsObjects := false;
 
     TotalFPs := PcbLib.ComponentCount;
@@ -432,16 +434,19 @@ begin
                     Prims := slPrimsLine.Strings(l);
 // categorise Primitive types.
 // TBD
+                PCode := SimplePrimKindCode(Prim);
+                if (ansipos(PCode, Prims) > 0) or (Prims = 'A') then
+                begin
+                    if k = 0 then
+                        Prim2 := Prim
+                    else
+                        Prim2 := Prim.Replicate;
 
-                if k = 0 then
-                    Prim2 := Prim
-                else
-                    Prim2 := Prim.Replicate;
-
-                Prim2.Layer := ML2;
-                if k <> 0 then
-                    Board.AddPCBObject(Prim2);
-                TmpFootPrint.AddPCBObject(Prim2);
+                    Prim2.Layer := ML2;
+                    if k <> 0 then
+                        Board.AddPCBObject(Prim2);
+                    TmpFootPrint.AddPCBObject(Prim2);
+                end;
             end;
             slDMapLine.Clear;
         end;
@@ -529,6 +534,24 @@ begin
     end;
 
     Board.ViewManager_UpdateLayerTabs;
+end;
+
+function SimplePrimKindCode(Prim : IPCB_Primitive) : WideString;
+// [ALTBRPO]  All, Line, Text, Body, Region, Pad & Other
+var
+   POID : TObjectID;
+begin
+    POID := Prim.ObjectId;
+    case POID of
+    eTextObject          : Result := 'T';
+    eRegionObject        : Result := 'R';
+    eTrackObject         : Result := 'L';
+    eArcObject           : Result := 'L';
+    eComponentBodyObject : Result := 'B';
+    ePadObject           : Result := 'P';
+    else
+        Result := 'O';
+    end;
 end;
 
 function ConvertMLToMLID(slMLayerMapping : TStringList, const BothNV : boolean) : TStringList;
