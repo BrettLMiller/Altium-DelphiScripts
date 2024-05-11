@@ -443,7 +443,7 @@ begin
                 l := slSMapLine.IndexOf(ML1);
                 slPrimsLine := GetValuesListForName(slMLayerPrims, ML2);
                 Prims := 'A';
-                if (l > -1) and (slPrimsLine.Count > 0) then
+                if (l > -1) and (slPrimsLine.Count > l) then
                     Prims := slPrimsLine.Strings(l);
 // categorise Primitive types.
 // TBD
