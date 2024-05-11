@@ -21,7 +21,8 @@ Mapping file:
   For each Destination MechLayer MLx 1 to 1024:
     ImportMLayer =  SourceMLm|SourceMLn|..   m & n are 1 to 1024 cardinal value.
     ImportMLPrim =  Prims1|Prims2|.. where PrimsX = [ALTBRPO]  All, Line, Text, Body, Region, Pad & Other
-    There is one-to-one mapping between value(s) of the above keys
+    There is one-to-one mapping between value(s) of the above 2 keys
+    ImportMLayer=  (<blank>) means source ML is copied directly to destination.
     ImportMLayer=0 means source ML does NOT copy directly to destination.
     Other source layers listed after any first "0" are ignored.
 
@@ -48,6 +49,7 @@ Notes:
  2024-05-09  0.20 change INIFile section key ImportLayer to ImportMLayer
  2024-05-10  0.22 ImportMLayer=0 stops that ML transferring directly. Begin Prim mask support.
  2024-05-10  0.23 support Prim mask Inifile Key ImportMLPrim=A|T
+ 2024-05-11  0.24 Fix broken CreateMechLayerMappingFile with refactoring of FindMLInIniFile().
 
   TMechanicalLayerToKindItem
 
@@ -106,7 +108,7 @@ procedure ConfigureMechLayers(Board : IPCB_Board, IniFile : TIniFile); forward;
 function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
 function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
 
-function FindMLInIniFile(INIFile2 : TIniFile, const LayerName : WideString) : integer; forward;
+function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
 function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : WideString, const def : WideString) : TStringList; forward;
 function GetValuesListForName(slList : TStringList, MLID : integer) : TStringList;       forward;
 function ConvertMLToMLID(slMLayerMapping : TStringList, BothNV : boolean) : TStringList; forward;
@@ -197,8 +199,9 @@ begin
 
         if MechLayer.MechanicalLayerEnabled then
         begin
-//   find layer cardinal with layername match 
-            ImportIndex := FindMLInIniFile(IniFile2, LayerName);
+//  find layer cardinal with layername match
+//  default empty key value is blank as "0" has special meaning.
+            ImportIndex := FindMLInIniFile(IniFile2, LayerName, '');
 
             MLayerKind := NoMechLayerKind;
             if not LegacyMLS then
