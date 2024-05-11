@@ -50,6 +50,7 @@ Notes:
  2024-05-10  0.22 ImportMLayer=0 stops that ML transferring directly. Begin Prim mask support.
  2024-05-10  0.23 support Prim mask Inifile Key ImportMLPrim=A|T
  2024-05-11  0.24 Fix broken CreateMechLayerMappingFile with refactoring of FindMLInIniFile().
+ 2024-05-11  0.25 Better check for "no mapping found" in inifile. Allow for blank ImportPrim keyvalue text
 
   TMechanicalLayerToKindItem
 
@@ -281,6 +282,7 @@ var
     TotalFPs           : integer;
     StartTime          : TDateTime;
     StopTime           : TDateTime;
+    NoMapping          : boolean;
 
 begin
     IsLib := true;
@@ -327,9 +329,17 @@ begin
 //    Read in mapping file
 //    Store ImportLayer in StringList name by cardinal ML index,  ImportMLayer (value) can = '1|3|45'
     slMLayerMapping := GetAllSectionKeysValInIniFile(IniFile1, 'ImportMLayer', '');
-    if slMLayerMapping.Count < 1 then
+
+    NoMapping := true;
+    for i := 0 to (slMLayerMapping.Count -1) do
     begin
-        ShowMessage('No ReMapping found in file! Exiting. ');
+        if slMLayerMapping.ValueFromIndex(i) = '' then NoMapping := False;
+        if slMLayerMapping.Names(i) <> slMLayerMapping.ValueFromIndex(i) then NoMapping := False;
+    end;
+
+    if NoMapping then
+    begin
+        ShowMessage('No Layer Remapping found in file! Exiting. ');
         IniFile1.Free;
         EndHourGlass;
         exit;
@@ -433,7 +443,7 @@ begin
                 l := slSMapLine.IndexOf(ML1);
                 slPrimsLine := GetValuesListForName(slMLayerPrims, ML2);
                 Prims := 'A';
-                if l > -1 then
+                if (l > -1) and (slPrimsLine.Count > 0) then
                     Prims := slPrimsLine.Strings(l);
 // categorise Primitive types.
 // TBD
