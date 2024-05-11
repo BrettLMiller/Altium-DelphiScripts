@@ -51,6 +51,7 @@ Notes:
  2024-05-10  0.23 support Prim mask Inifile Key ImportMLPrim=A|T
  2024-05-11  0.24 Fix broken CreateMechLayerMappingFile with refactoring of FindMLInIniFile().
  2024-05-11  0.25 Better check for "no mapping found" in inifile. Allow for blank ImportPrim keyvalue text
+ 2024-05-12  0.26 When finished, focus the New PcbLib FP.
 
   TMechanicalLayerToKindItem
 
@@ -491,6 +492,7 @@ begin
     Board.ViewManager_UpdateLayerTabs;
     IniFile1.Free;
     NewPcbLib.Board.ViewManager_FullUpdate;
+    NewPcbLib.Navigate_FirstComponent;
     NewPcbLib.Board.GraphicalView_ZoomRedraw;
     NewPcbLib.RefreshView;
 
@@ -708,7 +710,7 @@ var
     MLayerPairKindStr2 : WideString;
     LayerName1         : WideString;
     LayerName2         : WideString;
-    Pair2LID           : integer;
+//    Pair2LID           : integer;
     LColour            : TColor;
     ML1, ML2           : integer;
     i, j, k            : Integer;
@@ -773,7 +775,7 @@ begin
 
             MLayerKindStr                      := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Kind',      LayerKindToStr(NoMechLayerKind) );
             MPairLayer                         := IniFile.ReadString ('MechLayer' + IntToStr(i), 'Pair',      '');
-            Pair2LID                           := IniFile.ReadInteger('MechLayer' + IntToStr(i), 'PairLayer', 0);
+//            Pair2LID                           := IniFile.ReadInteger('MechLayer' + IntToStr(i), 'PairLayer', 0);
             MLayerPairKindStr                  := IniFile.ReadString ('MechLayer' + IntToStr(i), 'PairKind',  LayerPairKindToStr(NoMechLayerKind) );
             MechLayer.LinkToSheet              := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'Sheet',     False);
             MechLayer.DisplayInSingleLayerMode := IniFile.ReadBool   ('MechLayer' + IntToStr(i), 'SLM',       False);
