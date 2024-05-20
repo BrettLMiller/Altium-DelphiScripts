@@ -53,7 +53,8 @@ Notes:
  2024-05-11  0.25 Better check for "no mapping found" in inifile. Allow for blank ImportPrim keyvalue text
  2024-05-12  0.26 When finished, focus the New PcbLib FP.
  2024-05-20  0.27 Check if new target PcbLib "name" is already loaded.
- 2024-05-21  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
+ 2024-05-20  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
+ 2024-05-21  0.29 AD22+ requires save & reload of PcbLib to refresh panel!!
 
   TMechanicalLayerToKindItem
 
@@ -528,7 +529,7 @@ begin
     slMLAyerMapSD.Free;
 
 //    Set all layers kinds pairs colours as defined in mapping file.
-    Board := NewPCBLib.Board;
+    Board := NewPcbLib.Board;
     ConfigureMechLayers(Board, IniFile1);
     Board.ViewManager_UpdateLayerTabs;
     IniFile1.Free;
