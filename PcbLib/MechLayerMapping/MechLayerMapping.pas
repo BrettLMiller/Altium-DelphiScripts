@@ -54,7 +54,7 @@ Notes:
  2024-05-12  0.26 When finished, focus the New PcbLib FP.
  2024-05-20  0.27 Check if new target PcbLib "name" is already loaded.
  2024-05-20  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
- 2024-05-21  0.29 AD22+ requires save & reload of PcbLib to refresh panel!!
+ 2024-05-21  0.29 AD22 requires save & reload of PcbLib to refresh panel!!
 
   TMechanicalLayerToKindItem
 
@@ -63,6 +63,7 @@ Notes:
 const
     NoColour          = 'ncol';
     AD19VersionMajor  = 19;
+    AD22VersionMajor  = 22;
     AD17MaxMechLayers = 32;       // scripting API has consts for TV6_Layer
     AD19MaxMechLayers = 1024;
     AllLayerDataMax   = 16;       // after this mech layer index only report the actual active layers.
@@ -515,8 +516,8 @@ begin
     TmpFootprint := nil;
     DumFootprint := nil;
 
-// fix PcbLib panel refresh AD22+
-    if not LegacyMLS then
+// fix PcbLib panel refresh AD22
+    if (VerMajor = AD22VersionMajor) then
     begin
         FileName := NewPcbLib.Board.FileName;
         SaveServerDoc(FileName, 'PCB');
