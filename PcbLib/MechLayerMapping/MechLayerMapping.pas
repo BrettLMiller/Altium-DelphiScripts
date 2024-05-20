@@ -52,6 +52,7 @@ Notes:
  2024-05-11  0.24 Fix broken CreateMechLayerMappingFile with refactoring of FindMLInIniFile().
  2024-05-11  0.25 Better check for "no mapping found" in inifile. Allow for blank ImportPrim keyvalue text
  2024-05-12  0.26 When finished, focus the New PcbLib FP.
+ 2024-05-20  0.27 Check if new target PcbLib "name" is already loaded.
 
   TMechanicalLayerToKindItem
 
@@ -72,6 +73,7 @@ const
     cDefaultInputMap  = 'PCBLibrariesDefault01.ini';
     cExportMLMapFile  = '-ML_Map.ini';
     cTmpPcbLibFile    = '_script_tmp.PcbLib';
+    cDocKindPcbLib    = 'PcbLib';
 
 var
     ServerDoc         : IServerDocument;
@@ -107,8 +109,10 @@ function GetMechLayerObject(LS: IPCB_MasterLayerStack, i : integer, var MLID : T
 function GetMechLayerObjectFromLID7(LS: IPCB_MasterLayerStack, var I : integer, MLID : TLayer) : IPCB_MechanicalLayer; forward;
 function ShowHideMechLayers(const ShowUsed : boolean) : TLayer; forward;
 procedure ConfigureMechLayers(Board : IPCB_Board, IniFile : TIniFile); forward;
-function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
 function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
+
+function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
+function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean; forward;
 
 function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
 function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : WideString, const def : WideString) : TStringList; forward;
@@ -283,6 +287,7 @@ var
     TotalFPs           : integer;
     StartTime          : TDateTime;
     StopTime           : TDateTime;
+    KeyValue           : WideString;
     NoMapping          : boolean;
 
 begin
@@ -334,8 +339,9 @@ begin
     NoMapping := true;
     for i := 0 to (slMLayerMapping.Count -1) do
     begin
-        if slMLayerMapping.ValueFromIndex(i) = '' then NoMapping := False;
-        if slMLayerMapping.Names(i) <> slMLayerMapping.ValueFromIndex(i) then NoMapping := False;
+        KeyValue := slMLayerMapping.ValueFromIndex(i);
+        if KeyValue = '' then NoMapping := False;
+        if slMLayerMapping.Names(i) <> KeyValue then NoMapping := False;
     end;
 
     if NoMapping then
@@ -357,6 +363,17 @@ begin
 //    Create new Destination PcbLib named from mapping filename.
     FolderPath := ExtractFilePath(Board.FileName);
     FileName   := ExtractFileName(FileName);
+
+    if CheckSameFileNameOpen(ChangefileExt(FileName,'') + cDotChar + Client.GetDefaultExtensionForDocumentKind(cDocKind_PcbLib), 'PCB') then
+    begin
+        ShowWarning('Problem: New PcbLib already open! ');
+        slMLayerPrims.Free;
+        slMLayerMapping.Free;
+        slMLAyerMapSD.Free;
+        IniFile1.Free;
+        EndHourGlass;
+        exit;
+    end;
     ServerDoc  := CreateFreeSourceDoc(FolderPath, ChangefileExt(FileName,''), cDocKind_PcbLib);
     NewPcbLib  := PcbServer.LoadPCBLibraryByPath(ServerDoc.FileName);
 
@@ -475,16 +492,23 @@ begin
 
         TmpFootprint.CopyTo(NewFootPrint, eFullCopy);
         NewPcbLib.RegisterComponent(NewFootprint);
+
+        TmpFootprint := nil;
+        PCBserver.DestroyPCBLibrary(TmpPcbLib);
     end;
 
 // remove default empty FP of new created PcbLib
     NewPcbLib.DeRegisterComponent(DumFootprint);
     NewPcbLib.RemoveComponent(DumFootprint);
+    DumFootprint := nil;
 
     FPrimList.Destroy;
     slSMapLine.Free;
     slDMapLine.Free;
     slPrimsLine.Free;
+    slMLayerPrims.Free;
+    slMLayerMapping.Free;
+    slMLAyerMapSD.Free;
 
 //    Set all layers kinds pairs colours as defined in mapping file.
     Board := NewPCBLib.Board;
@@ -1255,4 +1279,23 @@ begin
 //  an example default new name is SchLib1.SchLib
     Result := CreateNewFreeDocumentFromDocumentKind(DocKind, true);
     Success := Result.DoSafeChangeFileNameAndSave(LibFullPath, DocKind);
+end;
+
+function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean;
+var
+    SM          : IServerModule;
+    ServerDoc   : IServerDocument;
+    J           : Integer;
+begin
+    Result := false;
+    SM := Client.ServerModuleByName(ServerName);
+    if SM <> nil then
+    for J := 0 to (SM.DocumentCount - 1) do
+    begin
+        ServerDoc := SM.Documents(J);
+        if Samestring(ExtractFilename(ServerDoc.FileName), DocFilename, false) then
+        begin
+            Result := true;
+        end;
+    end;
 end;
