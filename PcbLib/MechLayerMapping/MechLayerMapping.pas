@@ -53,6 +53,7 @@ Notes:
  2024-05-11  0.25 Better check for "no mapping found" in inifile. Allow for blank ImportPrim keyvalue text
  2024-05-12  0.26 When finished, focus the New PcbLib FP.
  2024-05-20  0.27 Check if new target PcbLib "name" is already loaded.
+ 2024-05-21  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
 
   TMechanicalLayerToKindItem
 
@@ -73,7 +74,6 @@ const
     cDefaultInputMap  = 'PCBLibrariesDefault01.ini';
     cExportMLMapFile  = '-ML_Map.ini';
     cTmpPcbLibFile    = '_script_tmp.PcbLib';
-    cDocKindPcbLib    = 'PcbLib';
 
 var
     ServerDoc         : IServerDocument;
@@ -113,6 +113,7 @@ function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
 
 function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
 function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean; forward;
+function CloseServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;        forward;
 
 function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
 function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : WideString, const def : WideString) : TStringList; forward;
@@ -289,6 +290,7 @@ var
     StopTime           : TDateTime;
     KeyValue           : WideString;
     NoMapping          : boolean;
+    bCloseFile         : boolean;
 
 begin
     IsLib := true;
@@ -494,12 +496,27 @@ begin
         NewPcbLib.RegisterComponent(NewFootprint);
 
         TmpFootprint := nil;
-        PCBserver.DestroyPCBLibrary(TmpPcbLib);
+//        FileName := TmpPcbLib.Board.FileName;
+//        bCloseFile := false;
+//        if TmpPCBLib.HasServerDocument then bCloseFile := true;
+//        PCBserver.DestroyPCBLibrary(TmpPcbLib);
+//        if bCloseFile then
+//            CloseServerDoc(FileName, 'PCB');
     end;
 
 // remove default empty FP of new created PcbLib
-    NewPcbLib.DeRegisterComponent(DumFootprint);
-    NewPcbLib.RemoveComponent(DumFootprint);
+    if NewPcbLib.ComponentCount > 1 then
+    begin
+        TmpFootprint := NewPcbLib.GetComponent(1);
+        if LegacyMLS then
+            NewPcbLib.SetState_CurrentComponent(TmpFootprint)
+        else
+            NewPcbLib.Navigate_Component(TmpFootprint.Name);
+        NewPcbLib.RefreshView;
+        NewPcbLib.RemoveComponent(DumFootprint);
+        NewPcbLib.DeRegisterComponent(DumFootprint);
+    end;
+    TmpFootprint := nil;
     DumFootprint := nil;
 
     FPrimList.Destroy;
@@ -1296,6 +1313,28 @@ begin
         if Samestring(ExtractFilename(ServerDoc.FileName), DocFilename, false) then
         begin
             Result := true;
+        end;
+    end;
+end;
+
+function CloseServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
+var
+    SM          : IServerModule;
+    ServerDoc   : IServerDocument;
+    J           : Integer;
+begin
+    Result := false;
+    SM := Client.ServerModuleByName(ServerName);
+    if SM <> nil then
+    for J := 0 to (SM.DocumentCount - 1) do
+    begin
+        ServerDoc := SM.Documents(J);
+        if Samestring(ServerDoc.FileName, DocFilename, false) then
+        begin
+
+            Client.CloseDocument(ServerDoc);
+            Result := true;
+            break;
         end;
     end;
 end;
