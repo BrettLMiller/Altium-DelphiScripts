@@ -114,7 +114,8 @@ function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
 
 function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
 function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean; forward;
-function CloseServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;        forward;
+function ReloadServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;       forward;
+function SaveServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;         forward;
 
 function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
 function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : WideString, const def : WideString) : TStringList; forward;
@@ -318,7 +319,6 @@ begin
     OpenDialog        := TOpenDialog.Create(Application);
     OpenDialog.Title  := 'Mech Layer ReMapping from *.ini file';
     OpenDialog.Filter := 'INI file (*.ini)|*.ini';
-//    OpenDialog.InitialDir := ExtractFilePath(Board.FileName);
     OpenDialog.FileName := '';
     Flag := OpenDialog.Execute;
     if (Flag = 0) then exit;
@@ -497,12 +497,7 @@ begin
         NewPcbLib.RegisterComponent(NewFootprint);
 
         TmpFootprint := nil;
-//        FileName := TmpPcbLib.Board.FileName;
-//        bCloseFile := false;
-//        if TmpPCBLib.HasServerDocument then bCloseFile := true;
-//        PCBserver.DestroyPCBLibrary(TmpPcbLib);
-//        if bCloseFile then
-//            CloseServerDoc(FileName, 'PCB');
+        PCBserver.DestroyPCBLibrary(TmpPcbLib);
     end;
 
 // remove default empty FP of new created PcbLib
@@ -513,12 +508,20 @@ begin
             NewPcbLib.SetState_CurrentComponent(TmpFootprint)
         else
             NewPcbLib.Navigate_Component(TmpFootprint.Name);
-        NewPcbLib.RefreshView;
         NewPcbLib.RemoveComponent(DumFootprint);
         NewPcbLib.DeRegisterComponent(DumFootprint);
+        NewPcbLib.Navigate_FirstComponent;
     end;
     TmpFootprint := nil;
     DumFootprint := nil;
+
+// fix PcbLib panel refresh AD22+
+    if not LegacyMLS then
+    begin
+        FileName := NewPcbLib.Board.FileName;
+        SaveServerDoc(FileName, 'PCB');
+        ReloadServerDoc(Filename, 'PCB');
+    end;
 
     FPrimList.Destroy;
     slSMapLine.Free;
@@ -1318,7 +1321,7 @@ begin
     end;
 end;
 
-function CloseServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
+function ReloadServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
 var
     SM          : IServerModule;
     ServerDoc   : IServerDocument;
@@ -1332,10 +1335,30 @@ begin
         ServerDoc := SM.Documents(J);
         if Samestring(ServerDoc.FileName, DocFilename, false) then
         begin
-
-            Client.CloseDocument(ServerDoc);
-            Result := true;
+            Result := (ServerDoc.DoFileLoad = -1);
             break;
         end;
     end;
 end;
+
+function SaveServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
+var
+    SM          : IServerModule;
+    ServerDoc   : IServerDocument;
+    J           : Integer;
+begin
+    Result := false;
+    SM := Client.ServerModuleByName(ServerName);
+    if SM <> nil then
+    for J := 0 to (SM.DocumentCount - 1) do
+    begin
+        ServerDoc := SM.Documents(J);
+        if Samestring(ServerDoc.FileName, DocFilename, false) then
+        begin
+            Result := (ServerDoc.DoFileSave('') = -1);
+            break;
+        end;
+    end;
+end;
+
+
