@@ -216,8 +216,9 @@ begin
         NewFP := NewPcbLib.GetComponentByName(cDummyEmptyFP);
         if NewFP <> nil then
         begin
-            NewPcbLib.DeRegisterComponent(NewFP);
             NewPcbLib.RemoveComponent(NewFP);
+            NewPcbLib.DeRegisterComponent(NewFP);
+//            PcbServer.DestroyPCBLibComp(NewFP);
         end;
         ServerDoc.DoFileSave('');
         Client.CloseDocument(ServerDoc);
