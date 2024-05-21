@@ -55,6 +55,7 @@ Notes:
  2024-05-20  0.27 Check if new target PcbLib "name" is already loaded.
  2024-05-20  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
  2024-05-21  0.29 AD22 requires save & reload of PcbLib to refresh panel!!
+ 2024-05-22  0.30 AD22.11 does not require above hack.
 
   TMechanicalLayerToKindItem
 
@@ -90,6 +91,7 @@ var
     MechLayerPair     : TMechanicalLayerPair;       // IPCB_MechanicalLayerPairs.LayerPair(MechPairIdx)
     MechPairIdx       : integer;                    // index of above
     VerMajor          : integer;
+    VerMiddle         : integer;
     LegacyMLS         : boolean;
     MaxMechLayers     : integer;
     FileName          : String;
@@ -307,7 +309,8 @@ begin
 
     GUIMan := Client.GUIManager;
 
-    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
+    VerMajor  := GetBuildNumberPart(Client.GetProductVersion, 0);
+    VerMiddle := GetBuildNumberPart(Client.GetProductVersion, 1);
 
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
@@ -511,13 +514,14 @@ begin
             NewPcbLib.Navigate_Component(TmpFootprint.Name);
         NewPcbLib.RemoveComponent(DumFootprint);
         NewPcbLib.DeRegisterComponent(DumFootprint);
+//        PcbServer.DestroyPCBLibComp(DumFootprint);
         NewPcbLib.Navigate_FirstComponent;
     end;
     TmpFootprint := nil;
     DumFootprint := nil;
 
-// fix PcbLib panel refresh AD22
-    if (VerMajor = AD22VersionMajor) then
+// fix PcbLib panel refresh AD22+, okay 22.11
+    if ((VerMiddle < 11) and (VerMajor = AD22VersionMajor)) then
     begin
         FileName := NewPcbLib.Board.FileName;
         SaveServerDoc(FileName, 'PCB');
