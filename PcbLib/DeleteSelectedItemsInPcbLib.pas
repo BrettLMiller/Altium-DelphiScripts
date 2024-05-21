@@ -17,6 +17,7 @@
  08/01/2021  v1.6  Added StatusBar percentage delete progress & Cursor busy.
  03/07/2022  v1.7  refactor FP iterating simplify deleting with another objectlist.
  2023-10-22  v1.8  add dialog to allow optional bypass limit to cMaxObjects count
+ 2024-05-21  v1.9  reorder Remove & Deregister
 
 1000 primitives takes 2:30 mins & 1GB ram
 
@@ -196,6 +197,7 @@ Begin
 
 //  Delete Temporary Footprint
     CurrentLib.RemoveComponent(TempPcbLibComp);
+    CurrentLib.DeRegisterComponent(TempPcbLibComp);
     PcbServer.DestroyPCBLibComp(TempPcbLibComp);
 
     CurrentLib.Navigate_FirstComponent;
@@ -211,3 +213,4 @@ Begin
     ShowMessage('Deleted ' + HowMany + ' Items | selected count : ' + IntToStr(SelCountTot) );
 End;
 {..............................................................................}
+
