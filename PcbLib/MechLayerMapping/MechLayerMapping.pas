@@ -56,6 +56,7 @@ Notes:
  2024-05-20  0.28 order of Deregister & Remove caused problem in AD22+, make sure dummyFP is not current.
  2024-05-21  0.29 AD22 requires save & reload of PcbLib to refresh panel!!
  2024-05-22  0.30 AD22.11 does not require above hack.
+ 2024-05-25  0.31 Better solution to PcbLib panel refresh in AD22 AD24.
 
   TMechanicalLayerToKindItem
 
@@ -117,8 +118,7 @@ function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
 
 function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
 function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean; forward;
-function ReloadServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;       forward;
-function SaveServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;         forward;
+function GetServerDoc(const DocFilename : WideString, const ServerName : Widestring) : IServerDocument;  forward;
 
 function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
 function GetAllSectionKeysValInIniFile(INIFile : TIniFile, const SectionKey : WideString, const def : WideString) : TStringList; forward;
@@ -296,6 +296,9 @@ var
     KeyValue           : WideString;
     NoMapping          : boolean;
     bCloseFile         : boolean;
+    ServerDoc          : IServerDocument;
+    SDView             : IServerDocumentView;
+    SDViewName         : WideString;
 
 begin
     IsLib := true;
@@ -383,6 +386,8 @@ begin
     end;
     ServerDoc  := CreateFreeSourceDoc(FolderPath, ChangefileExt(FileName,''), cDocKind_PcbLib);
     NewPcbLib  := PcbServer.LoadPCBLibraryByPath(ServerDoc.FileName);
+    NewPcbLib.Board.BeginModify;
+    NewPcbLib.Board.BeginIgnoreChanges;
 
 // store & delete at finish..
     DumFootprint := NewPcbLib.GetComponent(0);
@@ -519,13 +524,22 @@ begin
     end;
     TmpFootprint := nil;
     DumFootprint := nil;
+    NewPcbLib.Board.EndModify;
+    NewPcbLib.Board.EndIgnoreChanges;
+    NewPcbLib.Board.GraphicallyInvalidate;
 
-// fix PcbLib panel refresh AD22+, okay 22.11
-    if ((VerMiddle < 11) and (VerMajor = AD22VersionMajor)) then
+    FileName := NewPcbLib.Board.FileName;
+//    PCBServer.RefreshDocumentView(FileName);
+
+    ServerDoc := GetServerDoc(FileName, 'PCB');
+
+    for I := 0 to (ServerDoc.Count - 1) do
     begin
-        FileName := NewPcbLib.Board.FileName;
-        SaveServerDoc(FileName, 'PCB');
-        ReloadServerDoc(Filename, 'PCB');
+        SDView := ServerDoc.View(I);
+
+        SDViewName := SDView.ViewName;
+        If (SDViewName = 'PCBLibPanel') or (SDViewName = 'PCBEditor') then
+            SDView.PerformAutoZoom;
     end;
 
     FPrimList.Destroy;
@@ -766,6 +780,8 @@ var
     i, j, k            : Integer;
     slUsedLPairKinds   : TStringList;
     slUsedLayerKinds   : TStringList;
+    sStatusBar         : WideString;
+    iStatusBar         : integer;
 
 begin
     PCBSysOpts := PCBServer.SystemOptions;
@@ -811,6 +827,13 @@ begin
 // add single settings & new pairs
     for i := 1 To MaxMechLayers do
     begin
+        if (i MOD cStatusUpdate) = 0 then
+        begin
+            iStatusBar := Int(i / MaxMechLayers * 100);
+            sStatusBar := ' configuring mech layers.. : ' + IntToStr(iStatusBar) + '% done';
+            GUIMan.StatusBar_SetState (1, sStatusBar);
+        end;
+
         MLayerKind := NoMechLayerKind;
         MechLayer  :=  GetMechLayerObject(LayerStack, i, ML1);
 
@@ -1326,7 +1349,7 @@ begin
     end;
 end;
 
-function ReloadServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
+function GetServerDoc(const DocFilename : WideString, const ServerName : Widestring) : IServerDocument;
 var
     SM          : IServerModule;
     ServerDoc   : IServerDocument;
@@ -1340,30 +1363,9 @@ begin
         ServerDoc := SM.Documents(J);
         if Samestring(ServerDoc.FileName, DocFilename, false) then
         begin
-            Result := (ServerDoc.DoFileLoad = -1);
+            Result := ServerDoc;
             break;
         end;
     end;
 end;
-
-function SaveServerDoc(const DocFilename : WideString, const ServerName : Widestring) : boolean;
-var
-    SM          : IServerModule;
-    ServerDoc   : IServerDocument;
-    J           : Integer;
-begin
-    Result := false;
-    SM := Client.ServerModuleByName(ServerName);
-    if SM <> nil then
-    for J := 0 to (SM.DocumentCount - 1) do
-    begin
-        ServerDoc := SM.Documents(J);
-        if Samestring(ServerDoc.FileName, DocFilename, false) then
-        begin
-            Result := (ServerDoc.DoFileSave('') = -1);
-            break;
-        end;
-    end;
-end;
-
 
