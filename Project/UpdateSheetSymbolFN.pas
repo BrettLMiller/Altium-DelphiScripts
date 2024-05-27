@@ -21,7 +21,6 @@ var
 
 procedure main;
 var
-    NewFilePath    : WideString;
     NewFileName    : WideString;
     Doc            : IDocument;
     I              : Integer;
@@ -36,7 +35,6 @@ begin
     Prj.DM_Compile;
 
 // open all SchDoc with sheet symbols else ParentSheetSymbolCount is wrong!
-
     For I := 0 to (Prj.DM_LogicalDocumentCount - 1) Do
     Begin
         Doc := Prj.DM_LogicalDocuments(I);
@@ -58,11 +56,8 @@ begin
                  // continue;
             End;
 
-            NewFilePath := ExtractFilePath(Doc.DM_FullPath) + NewFileName;
-
             if SameString(Doc.DM_FileName, OldSheetName, false) then
                 UpdateSheetSymbolFileName(Doc, NewFileName);   // not Path
-
         end;
     end;
 
@@ -86,8 +81,7 @@ Var
 
 Begin
     ParentSheetCount := SchematicDoc.DM_ParentSheetSymbolCount;
-    SchematicDoc.DM_SheetSymbolCount;
-    SchDocFilename := SchematicDoc.DM_FileName;
+    SchDocFilename   := SchematicDoc.DM_FileName;
 
     If (ParentSheetCount = 0) Then exit;
 
@@ -117,8 +111,6 @@ Begin
         SheetSymbol := ParentIterator.FirstSchObject;
         While SheetSymbol <> Nil Do
         Begin
-//            SheetSymbol.SheetFileName.Text;
-//            SheetSymbol.SheetName.Text;
             SSFN := SheetSymbol.GetState_SchSheetFileName;
             If (SchDocFilename = SSFN.Text) Then
                 SSFN.SetState_Text(FileNameUpdate);
@@ -129,7 +121,6 @@ Begin
 
         ParentSheet.SchIterator_Destroy(ParentIterator);
         SchServer.ProcessControl.PostProcess(ParentSheet, '');
-
         ParentDoc.DM_Compile;
 
         for J := 0 to (ParentDoc.DM_SheetSymbolCount - 1) do
