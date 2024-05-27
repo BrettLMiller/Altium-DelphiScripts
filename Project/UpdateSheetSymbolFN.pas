@@ -23,6 +23,7 @@ procedure main;
 var
     NewFileName    : WideString;
     Doc            : IDocument;
+    ServDoc        : IServerDocument;
     I              : Integer;
 
 begin
@@ -41,7 +42,8 @@ begin
         If Doc.DM_DocumentKind = cDocKind_Sch Then
         If Doc.DM_SheetSymbolCount > 0 Then
         Begin
-            Client.OpenDocumentShowOrHide(cDocKind_Sch, Doc.DM_FullPath , True);
+            ServDoc := Client.OpenDocumentShowOrHide(cDocKind_Sch, Doc.DM_FullPath , True);
+            Client.ShowDocument(ServDoc);
         End;
     End;
 
