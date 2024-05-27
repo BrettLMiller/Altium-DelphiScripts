@@ -532,7 +532,7 @@ begin
 //    PCBServer.RefreshDocumentView(FileName);
 
     ServerDoc := GetServerDoc(FileName, 'PCB');
-
+    if ServerDoc <> nil then
     for I := 0 to (ServerDoc.Count - 1) do
     begin
         SDView := ServerDoc.View(I);
@@ -1355,7 +1355,7 @@ var
     ServerDoc   : IServerDocument;
     J           : Integer;
 begin
-    Result := false;
+    Result := nil;
     SM := Client.ServerModuleByName(ServerName);
     if SM <> nil then
     for J := 0 to (SM.DocumentCount - 1) do
