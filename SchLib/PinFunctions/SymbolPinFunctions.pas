@@ -129,11 +129,11 @@ begin
     if Comp <> nil then
     begin
         SymbolsList.Add ('Report Pin Functions & Pin Names for Comp SYM  : ' + Comp.LibReference);
-//        RefreshCompSymbolPinFunc(Comp, cPinName);//
+        ReportCompSymbolPinFunc(Comp);
         Comp.GraphicallyInvalidate;
     end;
 
-    GenerateReport(SymbolsList, 'PinNameFuncNamesRep.txt');
+    GenerateReport(SymbolsList, 'PinFuncsRep.txt');
     SymbolsList.Free;
 end;
 
