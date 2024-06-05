@@ -3,6 +3,9 @@
   Operates on component symbol(s) in SchDoc & SchLib
 
 Summary
+ReportOneCMPSymPinFuncs          : one picked or current CMP
+   text file report of functions.
+
 RefreshAllSymbolFunctionFromName : All
 RefreshOneCMPSymbolPinFunctions  : one picked or current CMP
 RefreshOneCMPSymPinFuncsFromDesc : one picked or current CMP
@@ -44,10 +47,15 @@ Author BL Miller
  2023-08-11 v0.22  Support Copy/"paste" thru clipboard, Single symbol text processing helper functions
  2023-08-12 v0.23  Support comma or <tab> delimited text in clipboard.
  2023-10-19 v0.24  make PinFuncList local var 
+ 2024-06-05 v0.24  Report of existing pin functions of Current CMP.
 
 tbd:
  make the final pin name be another separate string in input file (not just all funcs)?
  .............................................................................................
+
+ISch_Pin.ExporttoParamters
+ |PINDEFINEDFUNCTIONSCOUNT=3|PINDEFINEDFUNCTION1=PGED1|PINDEFINEDFUNCTION2=AN7
+
 
 Convert CSV text to slashes & apply as pin functions (single pin clicking).
 ScriptingSystem:RunScriptText
@@ -62,6 +70,8 @@ const
     cCommaToFSlash    = true;        // convert clipboard text commas to forward slash.
     cDescription      = 2;
     cPinName          = 1;
+    cPinFuncCount     = 'PINDEFINEDFUNCTIONSCOUNT';      // const names in parameter export & ASCII file
+    cPinFuncN         = 'PINDEFINEDFUNCTION';
 
 Var
     CurrentSheet : ISch_Document;
@@ -73,16 +83,59 @@ procedure ProcessCompPinFunctions(Comp : ISch_Component, PinFuncList : TStringLi
 function PickAComp(const Sheet : ISch_Document, IsLib : boolean) : ISch_GraphicalObject; forward;
 Function GetAllSchCompParameters(const Component : ISch_BasicContainer) : TList; forward;
 function GetAllCompPins(Comp : ISch_Component) : TList; forward;
+function GetPinFunctions(Pin : ISch_Pin) : TStringList; forward;
+function ReportCompSymbolPinFunc(Component : ISch_Component) : boolean; forward;
 function RefreshCompSymbolPinFunc(Component : ISch_Component, const NameNDesc : integer) : boolean; forward;
 function RemoveFSCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
 function NegationChangePTA(Component : ISch_Component) : boolean; forward;
 function ImportClipBoard(const dummy : boolean) : TStringList; forward;
 function CleanCompSymbolPinNames(Component : ISch_Component) : ISch_Pin; forward;
+function FixCompSymbolPinNames(Component : ISch_Component) : boolean;     forward;
 function CleanPinName(Name : WideString) : WideString;  forward;
 function CleanPinName22(Name : WideString) : WideString;  forward;
 function CleanPinName17(Name : WideString) : WideString;  forward;
 Procedure GenerateReport(Report : TStringList, Filename : WideString);  forward;
 Procedure SetDocumentDirty (const Dummy : Boolean); forward;
+
+procedure ReportOneCMPSymbolPinFunctions;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
+
+    Symbolslist := TStringList.Create;
+    SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
+    SymbolsList.Add ('');
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        SymbolsList.Add ('Report Pin Functions & Pin Names for Comp SYM  : ' + Comp.LibReference);
+//        RefreshCompSymbolPinFunc(Comp, cPinName);//
+        Comp.GraphicallyInvalidate;
+    end;
+
+    GenerateReport(SymbolsList, 'PinNameFuncNamesRep.txt');
+    SymbolsList.Free;
+end;
 
 procedure LoadCMPSymbolPinNamesFromFile;
 var
@@ -246,6 +299,46 @@ begin
     end;
 
     GenerateReport(SymbolsList, 'CleanCompSymbolPinNames.txt');
+    SymbolsList.Free;
+end;
+
+procedure FixOneCMPSymbolPinNames;
+var
+    Comp       : ISch_Component;
+    Path       : WideString;
+    FileName   : WideString;
+    SchLib     : ISch_Lib;
+    CmpCnt     : integer;
+
+begin
+    If SchServer = Nil Then Exit;
+    CurrentSheet := SchServer.GetCurrentSchDocument;
+    If CurrentSheet = Nil Then Exit;
+
+    If (CurrentSheet.ObjectID <> eSchLib) and (CurrentSheet.ObjectID <> eSheet) Then
+    Begin
+         ShowError('Operates on SchDoc/Lib only.');
+         Exit;
+    End;
+    IsLib := false;
+    If (CurrentSheet.ObjectID = eSchLib) then IsLib := true;
+
+    VerMajor := GetBuildNumberPart(Client.GetProductVersion, 0);
+
+    Symbolslist := TStringList.Create;
+    SymbolsList.Add ('SchDoc/Lib : ' + ExtractFileName(CurrentSheet.DocumentName));
+    SymbolsList.Add ('');
+
+    Comp := PickAComp(CurrentSheet, IsLib);
+
+    if Comp <> nil then
+    begin
+        SymbolsList.Add ('Fix Pin Names for Comp SYM  : ' + Comp.LibReference);
+        FixCompSymbolPinNames(Comp);
+        Comp.GraphicallyInvalidate;
+    end;
+
+    GenerateReport(SymbolsList, 'FixCompSymbolPinNames.txt');
     SymbolsList.Free;
 end;
 
@@ -705,6 +798,36 @@ begin
     PinList.Free;
 end;
 {..............................................................................}
+function ReportCompSymbolPinFunc(Component : ISch_Component) : boolean;
+var
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    PinName        : WideString;
+    PinDesc        : WideString;
+    slFunctions    : TStringList;
+
+begin
+    slFunctions := TStringList;
+
+    PinIterator := Component.SchIterator_Create;
+    PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+
+    Pin := PinIterator.FirstSchObject;
+    While Pin <> Nil Do
+    Begin
+        slFunctions := GetPinFunctions(Pin);
+
+        PinName := Pin.GetState_Name;
+        PinDesc := Pin.GetState_Description;
+        SymbolsList.Add ('  ' + PadRight(Pin.Designator,3) + ' | ' + PadRight(PinName,20) + ' | ' + PadRight(PinDesc,20) + ' |' + slFunctions.DelimitedText);
+
+        Pin := PinIterator.NextSchObject;
+    End;
+    Component.SchIterator_Destroy(PinIterator);
+    slFunctions.Clear;
+    slFunctions.Free;
+end;
+{..............................................................................}
 function RefreshCompSymbolPinFunc(Component : ISch_Component, const NameNDesc : integer) : boolean;
 var
     Pin            : ISch_Pin;
@@ -746,12 +869,44 @@ begin
             begin
                 Pin.SetState_Name(PinDesc);
                 Pin.SetState_FunctionsFromName;
+
                 Pin.SetState_Name(PinName);
                 Pin.GraphicallyInvalidate;
             end;
 
             SymbolsList.Add ('  ' + Pin.Designator + ' | ' + PinName + ' | ' + PinDesc);
         end;
+        Pin := PinIterator.NextSchObject;
+    End;
+    Component.SchIterator_Destroy(PinIterator);
+end;
+{..............................................................................}
+// double display
+function FixCompSymbolPinNames(Component : ISch_Component) : boolean;
+var
+    Pin            : ISch_Pin;
+    PinIterator    : ISch_Iterator;
+    PinName        : WideString;
+
+begin
+    PinIterator := Component.SchIterator_Create;
+    PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+
+    Pin := PinIterator.FirstSchObject;
+    While Pin <> Nil Do
+    Begin
+        PinName := Pin.GetState_Name;
+        Pin.SetState_Name(PinName + '/' + PinName);
+  //      Pin.DeleteNameFunctions;
+
+        Pin.SetState_FunctionsFromName;
+        Pin.SetState_Name(PinName);
+        Pin.SetState_FunctionsFromName;
+        Pin.DefaultValue := PinName;
+        Pin.GraphicallyInvalidate;
+
+        SymbolsList.Add ('  ' + Pin.Designator + ' | ' + PinName );
+
         Pin := PinIterator.NextSchObject;
     End;
     Component.SchIterator_Destroy(PinIterator);
@@ -889,6 +1044,37 @@ begin
     begin
          Result := Sheet.CurrentSchComponent;
     end;
+end;
+{..............................................................................}
+function GetPinFunctions(Pin : ISch_Pin) : TStringList;
+var
+    slParameters   : TStringList;
+    i, j, PCount   : integer;
+    Func        : WideString;
+begin
+    Result := TStringList.Create;
+    Result.Delimiter := '|';
+    slParameters := TStringList.Create;
+    slParameters.Delimiter := '|';
+    slParameters.StrictDelimiter := true;
+    slParameters.NameValueSeparator := '=';
+
+    slParameters.DelimitedText := Pin.ExportToParameters;
+    i := slParameters.IndexOfName(cPinFuncCount);
+
+    if i > -1 then
+        PCount := slParameters.ValueFromIndex(i);
+    for i := 1 to PCount do
+    begin
+        Func := '';
+        j := slParameters.IndexOfName(cPinFuncN + IntToStr(i));
+        if j > 0 then
+            Func := slParameters.ValueFromIndex(j);
+        if Func <> '' then
+            Result.Add(Func);
+    end;
+    slParameters.Clear;
+    slParameters.Free;
 end;
 {..............................................................................}
 function CleanPinName(Name : WideString) : WideString;
