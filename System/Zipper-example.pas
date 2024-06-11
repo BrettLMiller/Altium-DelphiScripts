@@ -15,8 +15,6 @@ var
     I              : Integer;
 begin
 
-    ZipFileName := 'P:\Projects\testing-stuff\TestZip.ZIP';
-    ProjectPath := 'P:\Projects\testing-stuff\TestZIP\';
     ZipFileName := 'C:\Altium\TestZip.ZIP';
     ProjectPath := 'C:\Altium\TestZIP\';
 
@@ -33,7 +31,7 @@ begin
 // FileFiles() returns filenames in UPPERCASE.
     FindFiles(ProjectPath, '*.*', faAnyFile, true, GeneratedFiles);
 
-// This returns correct case & not '.' or '..' files.
+// This returns correct case & not '.' or '..' files. So file count is meaningful.
     GeneratedFiles.Clear;
     GetAllFilePathsMatchingMask(GeneratedFiles, ProjectPath, '*.*', true);
 
@@ -59,5 +57,4 @@ begin
     Zip.InstanceSize;
     ShowMessage('.Zip returns: ' + IntToStr(I) + '  size:' + IntToStr(Zip.InstanceSize) );   // + '   compress:' + IntToStr(Zip.CompressionLevel));
     Zip.Free;
-//    Close;
 end;
