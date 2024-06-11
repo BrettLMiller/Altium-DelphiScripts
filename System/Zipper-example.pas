@@ -1,3 +1,8 @@
+{ Zipper-example.pas
+
+tbd: could just use
+ CreateZipFile(AZipFileName, FileList, bPreservePaths);
+}
 
 procedure TestZipper;
 var
@@ -10,6 +15,8 @@ var
     I              : Integer;
 begin
 
+    ZipFileName := 'P:\Projects\testing-stuff\TestZip.ZIP';
+    ProjectPath := 'P:\Projects\testing-stuff\TestZIP\';
     ZipFileName := 'C:\Altium\TestZip.ZIP';
     ProjectPath := 'C:\Altium\TestZIP\';
 
@@ -38,7 +45,7 @@ begin
 // require relative path for files & subfolders.
         FilePath := ExtractRelativePath(ProjectPath, FilePath);
 
-// FileFiles() cleanup, not really required.
+// FileFiles() cleanup, not really required & does not handle subfolders.
         if (FilePath = cFilename_CurrentDir) or (FilePath = cFilename_ParentDir)  then
             continue;
 
