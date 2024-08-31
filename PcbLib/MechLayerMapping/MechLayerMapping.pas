@@ -57,6 +57,7 @@ Notes:
  2024-05-21  0.29 AD22 requires save & reload of PcbLib to refresh panel!!
  2024-05-22  0.30 AD22.11 does not require above hack.
  2024-05-25  0.31 Better solution to PcbLib panel refresh in AD22 AD24.
+ 2024-09-01  0.32 Reorder position of one function for clarity. Refactor out CheckSameFileNameOpen()
 
   TMechanicalLayerToKindItem
 
@@ -80,7 +81,6 @@ const
     cTmpPcbLibFile    = '_script_tmp.PcbLib';
 
 var
-    ServerDoc         : IServerDocument;
     PCBSysOpts        : IPCB_SystemOptions;
     GUIMan            : IGUIManager;
     Board             : IPCB_Board;
@@ -117,7 +117,6 @@ procedure ConfigureMechLayers(Board : IPCB_Board, IniFile : TIniFile); forward;
 function GetMechLayerCardinal(const MLID : TLayer) : integer; forward;
 
 function CreateFreeSourceDoc(DocPath : WideString, DocName : WideString, const DocKind : TDocumentKind) : IServerDocument; forward;
-function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean; forward;
 function GetServerDoc(const DocFilename : WideString, const ServerName : Widestring) : IServerDocument;  forward;
 
 function FindMLInIniFile(INIFile : TIniFile, const LayerName : WideString, const def : WideString) : integer; forward;
@@ -374,7 +373,8 @@ begin
     FolderPath := ExtractFilePath(Board.FileName);
     FileName   := ExtractFileName(FileName);
 
-    if CheckSameFileNameOpen(ChangefileExt(FileName,'') + cDotChar + Client.GetDefaultExtensionForDocumentKind(cDocKind_PcbLib), 'PCB') then
+    ServerDoc := GetServerDoc(ChangefileExt(FileName,'') + cDotChar + Client.GetDefaultExtensionForDocumentKind(cDocKind_PcbLib), 'PCB');
+    if ServerDoc <> nil then
     begin
         ShowWarning('Problem: New PcbLib already open! ');
         slMLayerPrims.Free;
@@ -1034,7 +1034,7 @@ begin
     else              Result := 'Unknown'
     end;
 end;
-
+// loop max 18 linked to above 
 function LayerStrToPairKind(LPKS : WideString) : TMechanicalLayerPairKind;
 var
     I : integer;
@@ -1096,6 +1096,21 @@ begin
     else              Result := 'Unknown'
     end;
 end;
+// loop max 45 linked to above 
+function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;
+var
+    I : integer;
+begin
+    Result := -1;
+    for I := 0 to 45 do
+    begin
+         if LayerKindToStr(I) = LKS then
+         begin
+             Result := I;
+             break;
+         end;
+    end;
+end;
 
 function GetMechLayerCardinal(const MLID : TLayer) : integer;
 var
@@ -1136,21 +1151,6 @@ begin
 
     I      := GetMechLayerCardinal(MLID);
     Result := GetMechLayerObject(LS, I, AMLID);
-end;
-
-function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;
-var
-    I : integer;
-begin
-    Result := -1;
-    for I := 0 to 45 do
-    begin
-         if LayerKindToStr(I) = LKS then
-         begin
-             Result := I;
-             break;
-         end;
-    end;
 end;
 
 function FindAllMechPairLayers(LayerStack : IPCB_LayerStack, MLPS : IPCB_MechanicalLayerPairs) : TStringList;
@@ -1328,25 +1328,6 @@ begin
 //  an example default new name is SchLib1.SchLib
     Result := CreateNewFreeDocumentFromDocumentKind(DocKind, true);
     Success := Result.DoSafeChangeFileNameAndSave(LibFullPath, DocKind);
-end;
-
-function CheckSameFileNameOpen(const DocFilename : WideString, const ServerName : Widestring) : boolean;
-var
-    SM          : IServerModule;
-    ServerDoc   : IServerDocument;
-    J           : Integer;
-begin
-    Result := false;
-    SM := Client.ServerModuleByName(ServerName);
-    if SM <> nil then
-    for J := 0 to (SM.DocumentCount - 1) do
-    begin
-        ServerDoc := SM.Documents(J);
-        if Samestring(ExtractFilename(ServerDoc.FileName), DocFilename, false) then
-        begin
-            Result := true;
-        end;
-    end;
 end;
 
 function GetServerDoc(const DocFilename : WideString, const ServerName : Widestring) : IServerDocument;
