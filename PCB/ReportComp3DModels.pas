@@ -1,4 +1,0 @@
-{ ReportComp3DModels.pas
-
-
-}
