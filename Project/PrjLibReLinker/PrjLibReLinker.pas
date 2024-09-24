@@ -17,6 +17,7 @@ BLM
 12/05/2020  0.11 unbreak the lib find method.
 31/05/2020  0.12 support LibPkg projects; remove the installed lib reporting
 05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
+2024-09-24  0.14 report totals at top of PrjPcb LibLinkSummary.txt
 
 Requires a project "holder" so procedures & functions can be found/shared.
 ..............................................................................}
@@ -29,7 +30,7 @@ Var
     WS        : IWorkspace;
     Prj       : IProject;
     IntLibMan : IIntegratedLibraryManager;
-    Report    : TStringList;
+//    Report    : TStringList;
     Summary   : TStringList;
 
 
@@ -184,6 +185,8 @@ Begin
     SubTotFLinkCount :=0;
 
     bSuccess := IterateTheDocs(cDocKind_Pcb, Fix, SubTotSLinkCount, SubTotFLinkCount);
+    Summary.Add('');
+    Summary.Add('');
     if not bSuccess then
     begin
         ShowMessage('problem with PcbDoc(s) ');
@@ -192,8 +195,8 @@ Begin
 
     TotFLinkCount := TotFLinkCount + SubTotFLinkCount;
 
-    Summary.Insert(LibCount + 6, 'Total Missing Sch Symbol Link Count : ' + IntToStr(TotSLinkCount));
-    Summary.Insert(LibCount + 7, 'Total Missing Footprint Link Count  : ' + IntToStr(TotFLinkCount));
+    Summary.Insert(4, 'Total Missing Sch Symbol Link Count : ' + IntToStr(TotSLinkCount));
+    Summary.Insert(5, 'Total Missing Footprint Link Count  : ' + IntToStr(TotFLinkCount));
     Summary.Add('===========  EOF  ==================================');
 
     FilePath := Prj.DM_ProjectFullPath;
