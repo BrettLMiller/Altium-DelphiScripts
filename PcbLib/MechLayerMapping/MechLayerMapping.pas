@@ -1,9 +1,10 @@
 { MechLayerMapping.pas                                                          }
-{ Summary   Used to create a mapping ini file for mech layer from focused PcbLib      }
-{           Works on PcbDoc & PcbLib files.                                           
+{ Summary   Creates new PcbLib with remapped mech layers from a focused PcbLib
+            Can ignore or replicate primitives & mech layers.
+            Works on PcbDoc & PcbLib files.                                           
 
     CreateMechLayerMappingFile()
-      requires default import map inifile in same folder as PcbDoc/Lib
+      requires default import map inifile for mech layers in same folder as PcbDoc/Lib
       requires focused target PcbDoc/Lib with configured mech layers: enabled names colours pairs kinds etc
       Outputs (write) an inifile with mapping info matching PcbDoc/Lib.
 
@@ -11,7 +12,6 @@
       User must edit the created mapping file to set ImportMLayer.
       ImportMLayer values supports mechlayer cardinal value 1-1024 (AD19+)
       and supports N-1 mapping by listing multiple values with "|" delimiter.
-
 
     ReMapPcbLibMechLayers()
       uses focused PcbLib & prompts for mapping file (read)
@@ -1349,4 +1349,5 @@ begin
         end;
     end;
 end;
+
 
